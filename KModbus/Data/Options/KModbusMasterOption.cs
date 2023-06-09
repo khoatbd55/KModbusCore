@@ -29,7 +29,6 @@ namespace KModbus.Config
             this.ListCmd = listCmd;
             this.DelayResponse = delayResponse;
             this.Baudrate = baudRate;
-            this.ListCmd = new List<CommandModbus_Service>();
         }
 
         public KModbusMasterOption(string nameComport,int msSleep, List<CommandModbus_Service> listCmd,int delayResponse,int baudRate,int waitResponse)
@@ -40,7 +39,6 @@ namespace KModbus.Config
             this.DelayResponse = delayResponse;
             this.Baudrate = baudRate;
             this.WaitResponse = waitResponse;
-            this.ListCmd = new List<CommandModbus_Service>();
         }
 
         public KModbusMasterOption(string nameComport,int baudrate)

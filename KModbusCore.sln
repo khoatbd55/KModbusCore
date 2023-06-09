@@ -7,6 +7,10 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "KUtilities", "KUtilities\KU
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "KModbus", "KModbus\KModbus.csproj", "{53FEA988-5C51-4942-8C43-261C16DC9544}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Sample", "Sample", "{A1226847-6CC0-4B10-92BE-D3959116B21A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KMobusSample", "KMobusSample\KMobusSample.csproj", "{3EF7F339-5AEA-49A5-82E4-74C5689D3384}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,9 +25,16 @@ Global
 		{53FEA988-5C51-4942-8C43-261C16DC9544}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{53FEA988-5C51-4942-8C43-261C16DC9544}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{53FEA988-5C51-4942-8C43-261C16DC9544}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3EF7F339-5AEA-49A5-82E4-74C5689D3384}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3EF7F339-5AEA-49A5-82E4-74C5689D3384}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3EF7F339-5AEA-49A5-82E4-74C5689D3384}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3EF7F339-5AEA-49A5-82E4-74C5689D3384}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3EF7F339-5AEA-49A5-82E4-74C5689D3384} = {A1226847-6CC0-4B10-92BE-D3959116B21A}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {72898D5C-E44E-49C2-A060-7DB326DA8B57}
