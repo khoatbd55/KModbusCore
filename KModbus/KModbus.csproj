@@ -2,13 +2,22 @@
 
   <PropertyGroup>
 	  <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+	  <TargetFrameworks Condition=" '$(OS)' == 'Windows_NT' ">$(TargetFrameworks);net471</TargetFrameworks>
 	  <Nullable>disable</Nullable>
-	  <PackageId>KModbusCore</PackageId>
+	  <PackageId>KModbus</PackageId>
 	  <Authors>Khoand</Authors>
+	  <PackageProjectUrl>https://github.com/khoatbd55/KModbusCore</PackageProjectUrl>
+	  <RepositoryUrl>https://github.com/khoatbd55/KModbusCore.git</RepositoryUrl>
+	  <Copyright>@Khoand</Copyright>
+	  <PackageTags>ModbusNet</PackageTags>
+	  <Description>library modbus master serial port</Description>
+	  <Version>1.0.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\KUtilities\KUtilities.csproj" />
+	  <ProjectReference Include="..\KUtilities\KUtilities.csproj">
+		  <PrivateAssets>All</PrivateAssets>
+	  </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -17,6 +26,7 @@
 
   <ItemGroup>
     <PackageReference Include="Nito.AsyncEx" Version="5.1.2" />
+	<PackageReference Include="OptimizedPriorityQueue" Version="5.1.0" />
   </ItemGroup>
 
 	<ItemGroup Condition="'$(TargetFramework)'=='net7.0'">		
@@ -26,5 +36,6 @@
 	<ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
 		<PackageReference Include="System.IO.Ports" Version="6.0.0" />
 	</ItemGroup>
+	
 
 </Project>
