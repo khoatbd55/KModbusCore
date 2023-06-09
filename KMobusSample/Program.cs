@@ -3,7 +3,6 @@ using KModbus;
 using KModbus.Message;
 using KModbus.Service;
 using KModbus.Service.Model;
-using System.Net.WebSockets;
 
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime();
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
@@ -16,7 +15,7 @@ var cmd = new ReadHoldingRegisterRequest(100, 0, 10);
 listCmd.Add(new CommandModbus_Service(cmd, CommandModbus_Service.CommandType.Repeat));
 Console.WriteLine("try openning comport");
 await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM7", 10, listCmd, 10, 9600));
-Console.WriteLine("modbus master running");
+Console.WriteLine("modbus master running,auto reconnect");
 
 while(true)
 {
