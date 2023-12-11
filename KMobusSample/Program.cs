@@ -4,6 +4,7 @@ using KModbus.Message;
 using KModbus.Service;
 using KModbus.Service.Model;
 
+
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime();
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
 modbusMaster.OnNoRespondMessageAsync += ModbusMaster_OnNoRespondMessageAsync;
@@ -11,15 +12,15 @@ modbusMaster.OnExceptionAsync += ModbusMaster_OnExceptionAsync;
 modbusMaster.OnClosedConnectionAsync += ModbusMaster_OnClosedConnectionAsync;
 
 List<CommandModbus_Service> listCmd = new List<CommandModbus_Service>();
-var cmd = new ReadHoldingRegisterRequest(100, 0, 10);
+var cmd = new ReadHoldingRegisterRequest(1, 0, 10);
 listCmd.Add(new CommandModbus_Service(cmd, CommandModbus_Service.CommandType.Repeat));
 Console.WriteLine("try openning comport");
-await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM7", 10, listCmd, 10, 9600));
+await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM7", 10, listCmd, 20, 9600,1500));
 Console.WriteLine("modbus master running,auto reconnect");
 
 while(true)
 {
-    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(100, 0, 10), new CancellationTokenSource().Token);
+    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(1, 0, 10), new CancellationTokenSource().Token);
     if (res.Type == KModbus.Data.EModbusCmdResponseType.Success)
     {
         var request = (ReadInputRegisterRequest)res.ResultObj.Request;

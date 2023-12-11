@@ -93,8 +93,6 @@ namespace KModbus.Service
             eventQueue = new Queue<EventHandleMultileService_Base>();
             listModbusMaster = new ModbusMasterRtuMultile_RuntimeCollection();
             waitHandleEvent = new SemaphoreSlim(0);
-
-
         }
 
         public async Task RunAsync(List<KModbusMasterOption> listOption)

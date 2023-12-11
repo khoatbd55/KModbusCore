@@ -94,20 +94,28 @@ namespace KModbus.IO
         
         public void Open(int baudRate, string portName, Parity parity, int databit, StopBits stopBit)
         {
-            comport = new SerialPort();
-            comport.BaudRate = baudRate;
-            comport.PortName = portName;
-            comport.Parity = parity;
-            comport.DataBits = databit;
-            comport.StopBits = stopBit;
-            comport.Open();
+            try
+            {
+                comport = new SerialPort();
+                comport.BaudRate = baudRate;
+                comport.PortName = portName;
+                comport.Parity = parity;
+                comport.DataBits = databit;
+                comport.StopBits = stopBit;
+                comport.Open();
+            }
+            catch (Exception ex)
+            {
+                comport.Dispose();
+                throw new Exception(ex.Message, ex.InnerException);
+            }
             _recvQueue = new KAsyncQueue<MsgComportRecv>();
             _sendQueue = new KAsyncQueue<byte[]>();
             _readCancellationSource = new CancellationTokenSource();
             _backgroundCancellationSource = new CancellationTokenSource();
             var c = _backgroundCancellationSource.Token;
             _stopQueue = new KAsyncQueue<Exception>();
-            _taskRecv = Task.Run(() => ProcessInflightRecieved(c,_readCancellationSource.Token), c);
+            _taskRecv = Task.Run(() => ProcessInflightRecieved(c, _readCancellationSource.Token), c);
             _taskSendData = Task.Run(() => ProcessSendData(c), c);
             _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
         }
