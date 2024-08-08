@@ -1,7 +1,7 @@
 KModbus
 =======
 
-NModbus is a C# implementation of the Modbus protocol.
+KModbus is a C# implementation of the Modbus protocol.
 Provides connectivity to Modbus slave compatible devices and applications.
 Supports serial serial RTU, TCP, asynchronous support,high performance, multi serial ,auto reconnect 
 Project includes demo code
