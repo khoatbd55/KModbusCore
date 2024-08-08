@@ -36,17 +36,17 @@ namespace KModbus.IO
         protected SerialPort comport;
         // connection is closing due to peer
         public const int ResponseFrameStartLength = 4;
-        private CancellationTokenSource _backgroundCancellationSource=new CancellationTokenSource();
-        private CancellationTokenSource _readCancellationSource=new CancellationTokenSource();
-        
+        private CancellationTokenSource _backgroundCancellationSource = new CancellationTokenSource();
+        private CancellationTokenSource _readCancellationSource = new CancellationTokenSource();
+
         private IModbusFormatter _modbusFormatter;
         Task _taskRecv;
         Task _taskStop;
         Task _taskSendData;
-        KAsyncQueue<Exception> _stopQueue=new KAsyncQueue<Exception>();
+        KAsyncQueue<Exception> _stopQueue = new KAsyncQueue<Exception>();
         object _lockStop = new object();
-        KAsyncQueue<MsgComportRecv> _recvQueue=new KAsyncQueue<MsgComportRecv>();
-        KAsyncQueue<byte[]> _sendQueue=new KAsyncQueue<byte[]>();
+        KAsyncQueue<MsgComportRecv> _recvQueue = new KAsyncQueue<MsgComportRecv>();
+        KAsyncQueue<byte[]> _sendQueue = new KAsyncQueue<byte[]>();
 
         public ModbusRtuTransport(IModbusFormatter modbusFormatter)
         {
@@ -91,7 +91,7 @@ namespace KModbus.IO
             this.OnConnectionClosing(new Exception("disconnect by requires"));
             await WaitForTask(_taskStop);
         }
-        
+
         public void Open(int baudRate, string portName, Parity parity, int databit, StopBits stopBit)
         {
             try
@@ -137,10 +137,10 @@ namespace KModbus.IO
                     this.OnConnectionClosing(ex);
                 }
             }
-            
+
         }
 
-        public void Open(string portName,int baud)
+        public void Open(string portName, int baud)
         {
             Open(baud, portName, Parity.None, 8, StopBits.One);
         }
@@ -196,7 +196,7 @@ namespace KModbus.IO
 
                 }
             });
-            await Task.Delay(1200).ConfigureAwait(false);// đợi cho cổng đóng hẳn
+            await Task.Delay(2000).ConfigureAwait(false);// đợi cho cổng đóng hẳn
             _recvQueue.Clear();
             _ = Task.Run(() =>
             {
@@ -204,20 +204,20 @@ namespace KModbus.IO
                 if (Closed != null)
                     Closed.Invoke(this, new EventArgs());
             });
-            
+
         }
         protected void EnqueueMsgRecComport(MsgComportRecv msg)
         {
             _recvQueue.Enqueue(msg);
         }
-        protected virtual async Task ProcessInflightRecieved(CancellationToken c,CancellationToken cRead)
+        protected async Task ProcessInflightRecieved(CancellationToken c, CancellationToken cRead)
         {
             try
             {
                 while (!c.IsCancellationRequested)
                 {
                     byte[] frameStart = await ReadAsync(ResponseFrameStartLength, c).ConfigureAwait(false);
-                    if(frameStart.Length==4)
+                    if (frameStart.Length == 4)
                     {
                         var byteToRead = MessageHandle_Service.GetRtuRequestBytesToRead(frameStart);
                         if (byteToRead > 0 && byteToRead < 255)
@@ -236,13 +236,13 @@ namespace KModbus.IO
                         }
                         else
                         {
-                            throw new FrameModbusRecieveException("frame modbus not correct,body frame difference 0 and 255");                                 
-                        }    
-                    }     
+                            throw new FrameModbusRecieveException("frame modbus not correct,body frame difference 0 and 255");
+                        }
+                    }
                     else
                     {
                         throw new FrameModbusRecieveException("frame modbus not correct ,header < 4 bytes");
-                    }    
+                    }
                 }
             }
             catch (Exception ex)
@@ -252,7 +252,7 @@ namespace KModbus.IO
             }
         }
 
-        public async Task< byte[]> ReadAsync(int count,CancellationToken c)
+        public async Task<byte[]> ReadAsync(int count, CancellationToken c)
         {
             byte[] frameBytes = new byte[count];
             int numBytesRead = 0;
@@ -262,8 +262,8 @@ namespace KModbus.IO
                 if (result == 0)
                     break;
                 else
-                { 
-                    numBytesRead+=result; 
+                {
+                    numBytesRead += result;
                 }
             }
             return frameBytes;

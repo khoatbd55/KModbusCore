@@ -3,6 +3,7 @@ using KModbus;
 using KModbus.Message;
 using KModbus.Service;
 using KModbus.Service.Model;
+using KUtilities.ConvertExtentions;
 
 
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime();
@@ -12,22 +13,30 @@ modbusMaster.OnExceptionAsync += ModbusMaster_OnExceptionAsync;
 modbusMaster.OnClosedConnectionAsync += ModbusMaster_OnClosedConnectionAsync;
 
 List<CommandModbus_Service> listCmd = new List<CommandModbus_Service>();
-var cmd = new ReadHoldingRegisterRequest(1, 0, 10);
-listCmd.Add(new CommandModbus_Service(cmd, CommandModbus_Service.CommandType.Repeat));
+//var cmd = new ReadHoldingRegisterRequest(100, 257, 13);
+//listCmd.Add(new CommandModbus_Service(cmd, CommandModbus_Service.CommandType.Repeat));
 Console.WriteLine("try openning comport");
-await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM7", 10, listCmd, 20, 9600,1500));
+await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM4", 10, listCmd, 20, 9600,1500));
 Console.WriteLine("modbus master running,auto reconnect");
 
 while(true)
 {
-    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(1, 0, 10), new CancellationTokenSource().Token);
+    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadHoldingRegisterRequest(100, 256, 13), new CancellationTokenSource().Token);
     if (res.Type == KModbus.Data.EModbusCmdResponseType.Success)
     {
-        var request = (ReadInputRegisterRequest)res.ResultObj.Request;
-        var response = (ReadInputRegisterResponse)res.ResultObj.Response;
-        Console.WriteLine("adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", response.Register));
+        var request = (ReadHoldingRegisterRequest)res.ResultObj.Request;
+        var response = (ReadHoldingRegisterResponse)res.ResultObj.Response;
+        var f_reg = response.Register;
+        double ppmv = ((double)f_reg[7]);
+        double pw = ((double)f_reg[8]) / 10;
+        double pws = ((double)f_reg[9]) / 10;
+        
+        double hpa = 1000000 * pw / ppmv + pw;
+        double rh = pw * 100 / pws;
+        
+        Console.WriteLine("adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg));
     }
-    await Task.Delay(100);
+    await Task.Delay(1000);
 }    
 Task ModbusMaster_OnClosedConnectionAsync(KModbus.Service.Event.Child.MsgClosedConnectionEventArgs arg)
 {
@@ -49,16 +58,16 @@ Task ModbusMaster_OnNoRespondMessageAsync(KModbus.Service.Event.MsgNoResponseMod
 
 Task ModbusMaster_OnRecievedMessageAsync(KModbus.Service.Event.MsgResponseModbus_EventArg arg)
 {
-    Console.WriteLine("modbus master recv message . slave id:{0} func:{1}", arg.Message.Response.SlaverAddress, arg.Message.Response.FuntionCode);
-    if (arg.Message.Request.FuntionCode == ModbusFunctionCodes.ReadHoldingRegisters)
-    {
-        var request=(ReadHoldingRegisterRequest)arg.Message.Request;
-        var response=(ReadHoldingRegisterResponse)arg.Message.Response;
-        Console.WriteLine("adr holding request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", response.Register));
-    }
-    else if(arg.Message.Request.FuntionCode==ModbusFunctionCodes.ReadInputRegisters)
-    {
+    //Console.WriteLine("modbus master recv message . slave id:{0} func:{1}", arg.Message.Response.SlaverAddress, arg.Message.Response.FuntionCode);
+    //if (arg.Message.Request.FuntionCode == ModbusFunctionCodes.ReadHoldingRegisters)
+    //{
+    //    var request=(ReadHoldingRegisterRequest)arg.Message.Request;
+    //    var response=(ReadHoldingRegisterResponse)arg.Message.Response;
+    //    Console.WriteLine("adr holding request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", response.Register));
+    //}
+    //else if(arg.Message.Request.FuntionCode==ModbusFunctionCodes.ReadInputRegisters)
+    //{
 
-    }
+    //}
     return Task.CompletedTask;    
 }

@@ -18,6 +18,7 @@ using KUtilities.TaskExtentions;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO.Ports;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
@@ -30,14 +31,13 @@ namespace KModbus.Service
     public class ModbusMasterRtu_Runtime : IModbusMaster
     {
         public delegate void ModbusMasterLogEventHandle(object sender, ModbusLogEventArgs e);
-
         public event ModbusMasterLogEventHandle OnLog;
-       
+
 
         readonly KAsyncEvent<MsgResponseModbus_EventArg> _recievedMessageEvent = new KAsyncEvent<MsgResponseModbus_EventArg>();
         readonly KAsyncEvent<MsgNoResponseModbus_EventArg> _noRespondMessageEvent = new KAsyncEvent<MsgNoResponseModbus_EventArg>();
         readonly KAsyncEvent<MsgClosedConnectionEventArgs> _closedConnectionEvent = new KAsyncEvent<MsgClosedConnectionEventArgs>();
-        readonly KAsyncEvent<MsgExceptionEventArgs> _exceptionEvent=new KAsyncEvent<MsgExceptionEventArgs> ();
+        readonly KAsyncEvent<MsgExceptionEventArgs> _exceptionEvent = new KAsyncEvent<MsgExceptionEventArgs>();
 
         public event Func<MsgResponseModbus_EventArg, Task> OnRecievedMessageAsync
         {
@@ -63,8 +63,8 @@ namespace KModbus.Service
             remove => _exceptionEvent.RemoveHandler(value);
         }
 
-        KPriorityQueueAsync<CommandModbus_Service> _commandQueue=new KPriorityQueueAsync<CommandModbus_Service>();
-        KAsyncQueue<EventMsgHandle_Base> _eventQueue=new KAsyncQueue<EventMsgHandle_Base>();
+        KPriorityQueueAsync<CommandModbus_Service> _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
+        KAsyncQueue<EventMsgHandle_Base> _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
 
         SemaphoreSlim _waitHandleSleep;
         SemaphoreSlim _waitCheckCountQueue;
@@ -74,7 +74,7 @@ namespace KModbus.Service
         private int _msSleep;
         private int _delayResponse;
         private int _totalCommandRepeat;
-        private int _isComportOpened=0;
+        private int _isComportOpened = 0;
 
         KModbusMasterOption _option;
 
@@ -83,7 +83,7 @@ namespace KModbus.Service
         CancellationTokenSource _sendCmdCancelTokenSource = new CancellationTokenSource();
         int _connectstatus = (int)(EModbusConnectStatus.Closed);
         List<TaskCompleteSouceRpcModel> _listTaskRpc = new List<TaskCompleteSouceRpcModel>();
-        KAsyncTaskCompletionSource<IModbusResponse> _taskCompleteSouceMessage=new KAsyncTaskCompletionSource<IModbusResponse>();
+        KAsyncTaskCompletionSource<IModbusResponse> _taskCompleteSouceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
         IModbusFormatter _modbusFormatter;
         Task _taskStop;
         KAsyncQueue<Exception> _stopQueue = new KAsyncQueue<Exception>();
@@ -98,13 +98,13 @@ namespace KModbus.Service
         readonly object _syncMessage = new object();
         readonly object _syncWaitHandleSleep = new object();
 
-        public string NameComport 
-        { 
-            get { return this._option.NameComport; } 
+        public string NameComport
+        {
+            get { return this._option.NameComport; }
         }
 
         public bool IsConnected { get; set; }
-        
+
         public int TotalQueueCommand
         {
             get { return this._commandQueue.Count; }
@@ -114,15 +114,15 @@ namespace KModbus.Service
         {
             get
             {
-                return ((EModbusConnectStatus)_connectstatus)==EModbusConnectStatus.Opened;
+                return ((EModbusConnectStatus)_connectstatus) == EModbusConnectStatus.Opened;
             }
         }
 
         public enum ECmdPriority
         {
-            Priority=0, // càng thấp càng ưu tiên cao
+            Priority = 0, // càng thấp càng ưu tiên cao
             Default,
-            
+
         }
 
         private void OnClosing(Exception e)
@@ -144,7 +144,7 @@ namespace KModbus.Service
         public async Task DisconnectAsync()
         {
             this.OnClosing(new Exception("disconnect by require"));
-            await WaitForTask(_taskStop).ConfigureAwait(false);            
+            await WaitForTask(_taskStop).ConfigureAwait(false);
         }
 
         public ModbusMasterRtu_Runtime()
@@ -155,13 +155,13 @@ namespace KModbus.Service
             _modbusFormatter = new ModbusRtuFormatter();
             _taskCompleteSouceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
         }
-        
+
         public void Run(KModbusMasterOption option)
         {
             this._option = option;
             this._msSleep = option.MsSleep;
             this._delayResponse = option.DelayResponse;
-            Comport_Init(option.NameComport, option.Baudrate);
+            Comport_Init(option.NameComport, option.Baudrate, option.Parity, option.DataBit, _option.StopBits);
             Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
             _backgroundCancelTokenSource = new CancellationTokenSource();
             _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
@@ -187,44 +187,44 @@ namespace KModbus.Service
 
         private async Task ProcessAutoReconnect(CancellationToken c)
         {
-            while(!c.IsCancellationRequested)
+            while (!c.IsCancellationRequested)
             {
                 try
                 {
-                    if(_isComportOpened==0)
+                    if (_isComportOpened == 0)
                     {
                         bool isCancel = false;
                         // nếu task gửi dữ liệu chưa dừng thì dừng
-                        lock(_syncAutoReconnect)
+                        lock (_syncAutoReconnect)
                         {
                             if (_sendCmdCancelTokenSource.IsCancellationRequested == false)
                             {
                                 _sendCmdCancelTokenSource?.Cancel();
                                 isCancel = true;
                             }
-                        }    
-                        if(isCancel)
+                        }
+                        if (isCancel)
                         {
                             // chở cho task send đóng hẳn
                             await WaitForTask(_taskCommand).ConfigureAwait(false);
-                        }    
-                        WriteLog(EModbusLogType.Infomation,"reconnect modbus ");
+                        }
+                        WriteLog(EModbusLogType.Infomation, "reconnect modbus ");
                         // cố gắng mở lại kết nối
-                        Comport_Init(_option.NameComport, _option.Baudrate);
+                        Comport_Init(_option.NameComport, _option.Baudrate, _option.Parity, _option.DataBit, _option.StopBits);
                         Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
                         _sendCmdCancelTokenSource = new CancellationTokenSource();
                         var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
                         _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
                         WriteLog(EModbusLogType.Infomation, "reconnect success, modbus running...");
-                    }    
+                    }
                 }
                 catch (Exception ex)
                 {
                     EventMsgHandle_ExceptionSerial msgEvent = new EventMsgHandle_ExceptionSerial(ex);
                     EnqueueEvent(msgEvent);
                 }
-                await Task.Delay(500,c).ConfigureAwait(false);
-            }    
+                await Task.Delay(500, c).ConfigureAwait(false);
+            }
         }
 
         public async Task RunAsync(KModbusMasterOption option)
@@ -261,10 +261,10 @@ namespace KModbus.Service
             {
                 _backgroundCancelTokenSource?.Cancel();
             }
-            lock(_syncAutoReconnect)
+            lock (_syncAutoReconnect)
             {
                 _sendCmdCancelTokenSource?.Cancel();
-            }    
+            }
             await _clientComport.DisconnectAsync().ConfigureAwait(false);
             await WaitForTask(_taskCommand).ConfigureAwait(false);
             await WaitForTask(_taskAutoReconnect).ConfigureAwait(false);
@@ -275,15 +275,15 @@ namespace KModbus.Service
             {
                 _listTaskRpc.Clear();
             }
-            
+
             this._waitCheckCountQueue.Release();
-            if(_closedConnectionEvent.HasHandlers)
+            if (_closedConnectionEvent.HasHandlers)
             {
-                await _closedConnectionEvent.InvokeAsync(new MsgClosedConnectionEventArgs(new EventArgs(),this)).ConfigureAwait(false);
-            }    
+                await _closedConnectionEvent.InvokeAsync(new MsgClosedConnectionEventArgs(new EventArgs(), this)).ConfigureAwait(false);
+            }
         }
 
-        private void EnqueueCommand(CommandModbus_Service cmd_data,ECmdPriority pirority)
+        private void EnqueueCommand(CommandModbus_Service cmd_data, ECmdPriority pirority)
         {
             // chỉ cho phép gửi lệnh khi cổng serial đã mở 
             if (_isComportOpened == 1)
@@ -298,7 +298,7 @@ namespace KModbus.Service
                 {
                     this._waitHandleSleep.Release();
                 }
-            }    
+            }
         }
         private void EnqueueEvent(EventMsgHandle_Base eventData)
         {
@@ -307,13 +307,13 @@ namespace KModbus.Service
             {
                 _eventQueue.Enqueue(eventData);
             }
-           
+
         }
         public void SendCommand_NoRepeat(IModbusRequest requestModbus)
         {
-            if (this.IsRunning )
+            if (this.IsRunning)
             {
-                CommandModbus_Service cmd = new CommandModbus_Service(requestModbus, CommandModbus_Service.CommandType.NoRepeat,Guid.NewGuid());
+                CommandModbus_Service cmd = new CommandModbus_Service(requestModbus, CommandModbus_Service.CommandType.NoRepeat, Guid.NewGuid());
                 EnqueueCommand(cmd, ECmdPriority.Default);
             }
         }
@@ -326,12 +326,12 @@ namespace KModbus.Service
             }
         }
 
-        public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request,  CancellationToken c)
+        public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request, CancellationToken c)
         {
-            return await SendCommandNoRepeatAsync(request,5000,ECmdPriority.Default,c).ConfigureAwait(false);
+            return await SendCommandNoRepeatAsync(request, 5000, ECmdPriority.Default, c).ConfigureAwait(false);
         }
 
-        public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request,int timeOut, CancellationToken c)
+        public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request, int timeOut, CancellationToken c)
         {
             return await SendCommandNoRepeatAsync(request, timeOut, ECmdPriority.Default, c).ConfigureAwait(false);
         }
@@ -567,7 +567,7 @@ namespace KModbus.Service
                                     if (_recievedMessageEvent.HasHandlers)
                                     {
                                         await _recievedMessageEvent.InvokeAsync(
-                                            new MsgResponseModbus_EventArg(event_response,this)).ConfigureAwait(false);
+                                            new MsgResponseModbus_EventArg(event_response, this)).ConfigureAwait(false);
                                     }
                                 }
                                 break;
@@ -576,19 +576,19 @@ namespace KModbus.Service
                                     if (_noRespondMessageEvent.HasHandlers)
                                     {
                                         await _noRespondMessageEvent.InvokeAsync(
-                                            new MsgNoResponseModbus_EventArg(((EventMsgHandle_NoResponse)eventData).Command_Request,this)).ConfigureAwait(false);
+                                            new MsgNoResponseModbus_EventArg(((EventMsgHandle_NoResponse)eventData).Command_Request, this)).ConfigureAwait(false);
                                     }
                                     WriteLog(EModbusLogType.Warning, "device no response");
                                 }
-                                
+
                                 break;
                             case EventMsgHandle_Base.TYPE_EXCEPTION_COMPORT:
                                 {
                                     var msg = (EventMsgHandle_ExceptionSerial)eventData;
-                                    if(_exceptionEvent.HasHandlers)
+                                    if (_exceptionEvent.HasHandlers)
                                     {
-                                        await _exceptionEvent.InvokeAsync(new MsgExceptionEventArgs(msg.Ex,this)).ConfigureAwait(false);
-                                    }    
+                                        await _exceptionEvent.InvokeAsync(new MsgExceptionEventArgs(msg.Ex, this)).ConfigureAwait(false);
+                                    }
                                     WriteLog(EModbusLogType.Error, "serial port closed", msg.Ex);
                                 }
                                 break;
@@ -602,20 +602,20 @@ namespace KModbus.Service
             }
         }
 
-        private void WriteLog(EModbusLogType type,string message ,Exception ex)
+        private void WriteLog(EModbusLogType type, string message, Exception ex)
         {
             EnqueueEvent(new EventMsgHandle_Log(type, message, ex));
         }
 
-        private void WriteLog(EModbusLogType type,string message)
+        private void WriteLog(EModbusLogType type, string message)
         {
             EnqueueEvent(new EventMsgHandle_Log(type, message));
         }
 
-        private void Comport_Init(string nameComport, int baudRate)
+        private void Comport_Init(string nameComport, int baudRate, Parity parity, int dataBit, StopBits stopBits)
         {
             _clientComport = new ModbusRtuTransport(_modbusFormatter);
-            _clientComport.Open(nameComport, baudRate);
+            _clientComport.Open(baudRate, nameComport, parity, dataBit, stopBits);
             _clientComport.MessageRecieved += ClientComport_MessageRecieved1;
             _clientComport.OnExceptionOccur += ClientComport_OnExceptionOccur;
             _clientComport.Closed += ClientComport_Closed; ;

@@ -47,6 +47,13 @@ namespace KUtilities.ConvertExtentions
             return result;
         }
 
+        public static Int16 BytesToInt16(byte[] frame, ref int idx)
+        {
+            var result = BitConverter.ToInt16(frame, idx);
+            idx += 2;
+            return result;
+        }
+
         public static UInt16 BytesToSwapUInt16(byte[] frame, ref int idx)
         {
             var result = (UInt16)(((int)frame[idx]) << 8 | frame[idx + 1]);
@@ -73,6 +80,13 @@ namespace KUtilities.ConvertExtentions
         {
             var result = BitConverter.ToSingle(frame, idx);
             idx += 4;
+            return result;
+        }
+
+        public static double BytesToDouble(byte[] frame,ref int idx)
+        {
+            var result = BitConverter.ToDouble(frame, idx);
+            idx += 8;
             return result;
         }
 

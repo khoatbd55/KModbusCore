@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KModbus\KModbus.csproj" />
+    <ProjectReference Include="..\KUtilities\KUtilities.csproj" />
   </ItemGroup>
 
 </Project>

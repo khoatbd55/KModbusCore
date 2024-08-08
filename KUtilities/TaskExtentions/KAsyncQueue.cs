@@ -40,6 +40,11 @@ namespace KUtilities.TaskExtentions
 
         }
 
+        public List<TItem> ToList()
+        {
+            return _queue.ToList();
+        }
+
         public KAsyncQueue(int limit)
         {
             Limit = limit;
