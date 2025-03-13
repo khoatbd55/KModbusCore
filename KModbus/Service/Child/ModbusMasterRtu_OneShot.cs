@@ -170,9 +170,9 @@ namespace KModbus.Service
             _modbusFormatter = new ModbusRtuFormatter();
         }
         
-        public void Run(string nameComport,List<CommandModbus_Service> list_command,int timeOut,int baudrate)
+        public async Task RunAsync(string nameComport,List<CommandModbus_Service> list_command,int timeOut,int baudrate)
         {
-            Comport_Init(nameComport, baudrate);
+            await Comport_Init(nameComport, baudrate);
             // add list command 
             foreach (var item_cmd in list_command)
             {
@@ -190,14 +190,14 @@ namespace KModbus.Service
             listTaskRun.Add(task);
             
         }
-        public void Run(string nameComport, List<CommandModbus_Service> list_command)
+        public async Task RunAsync(string nameComport, List<CommandModbus_Service> list_command)
         {
-            Run(nameComport, list_command, 3000,9600);
+            await RunAsync(nameComport, list_command, 3000,9600);
         }
 
-        public void Run(string nameComport,List<CommandModbus_Service> list_cmd,int baudrate)
+        public async Task RunAsync(string nameComport,List<CommandModbus_Service> list_cmd,int baudrate)
         {
-            Run(nameComport, list_cmd, 3000, baudrate);
+            await RunAsync(nameComport, list_cmd, 3000, baudrate);
         }
         private void EnqueueCommand(CommandModbus_Service cmd_data)
         {
@@ -252,8 +252,7 @@ namespace KModbus.Service
                                 switch (step)
                                 {
                                     case 0:// gửi lệnh
-                                        var frame = _modbusFormatter.Create(cmd_data.ModbusRequest);
-                                        clientComport.SendData(frame);
+                                        clientComport.SendData(cmd_data.ModbusRequest);
                                         bool state = this.waitRespondCommand.WaitOne(this.TimeOut);
                                         if (state)// có phản hồi 
                                         {
@@ -353,10 +352,9 @@ namespace KModbus.Service
             }
         }
 
-        private void Comport_Init(string nameComport,int baudrate)
+        private async Task Comport_Init(string nameComport,int baudrate)
         {
-            clientComport = new ModbusRtuTransport(_modbusFormatter);
-            clientComport.Open(nameComport,baudrate);
+            await clientComport.ConnectAsync();
             clientComport.MessageRecieved += ClientComport_MessageRecieved1;
             clientComport.Closed += ClientComport_Closed;
             clientComport.OnExceptionOccur += ClientComport_OnExceptionOccur;

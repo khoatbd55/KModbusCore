@@ -1,12 +1,21 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using KModbus;
+using KModbus.Data.Options;
+using KModbus.IO;
 using KModbus.Message;
 using KModbus.Service;
 using KModbus.Service.Model;
-using KUtilities.ConvertExtentions;
 
 
-ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime();
+var adapter = new ModbusRtuTransport(new SerialPortOptions()
+{
+    Baudrate=9600,
+    DataBit=8,
+    Parity=System.IO.Ports.Parity.None,
+    PortName="COM4",
+    StopBit=System.IO.Ports.StopBits.One,
+});
+ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime(adapter);
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
 modbusMaster.OnNoRespondMessageAsync += ModbusMaster_OnNoRespondMessageAsync;
 modbusMaster.OnExceptionAsync += ModbusMaster_OnExceptionAsync;
@@ -16,8 +25,26 @@ List<CommandModbus_Service> listCmd = new List<CommandModbus_Service>();
 //var cmd = new ReadHoldingRegisterRequest(100, 257, 13);
 //listCmd.Add(new CommandModbus_Service(cmd, CommandModbus_Service.CommandType.Repeat));
 Console.WriteLine("try openning comport");
-await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption("COM4", 10, listCmd, 20, 9600,1500));
-Console.WriteLine("modbus master running,auto reconnect");
+try
+{
+    await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption()
+    {
+        DelayResponse=10,
+        IsAutoReconnect=true,
+        ListCmd=listCmd,
+        MsSleep=10,
+        WaitResponse=1500,
+    });
+    Console.WriteLine("modbus master running,auto reconnect");
+}
+catch (Exception ex)
+{
+    Console.WriteLine("error open serial port.{0}",ex.Message);
+    Console.ReadKey();
+    return;
+}
+
+
 
 while(true)
 {
