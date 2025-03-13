@@ -103,6 +103,8 @@ namespace KModbus.IO
                 comport.DataBits = databit;
                 comport.StopBits = stopBit;
                 comport.Open();
+                comport.DiscardOutBuffer();
+                comport.DiscardInBuffer();
             }
             catch (Exception ex)
             {
