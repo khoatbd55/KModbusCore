@@ -1,6 +1,9 @@
-﻿using KModbus.Ex;
+﻿using KModbus.Data.Model;
+using KModbus.Data.Options;
+using KModbus.Ex;
 using KModbus.Extention;
 using KModbus.Formatter;
+using KModbus.Interfaces;
 using KModbus.Message;
 using KModbus.Message.Handles;
 using KUtilities.TaskExtentions;
@@ -15,23 +18,14 @@ using System.Threading.Tasks;
 
 namespace KModbus.IO
 {
-    internal class ModbusRtuTransport
+    public class ModbusRtuTransport: IMobusTransportAdapter
     {
-
-        // Delegate for MessageModbus Event Handle
-        public delegate void MessageModbusEventHandle(object sender, IModbusResponse e);
-        // Delegate for connection close
-        public delegate void ConnectionCloseEventHandle(object sender, EventArgs e);
-        //
-        public delegate void ExceptionOccurEventHandle(object sender, Exception ex);
-
         public event ExceptionOccurEventHandle OnExceptionOccur;
         // event for Message Modbus Recieved
         public event MessageModbusEventHandle MessageRecieved;
         // event for Connection closed
         public event ConnectionCloseEventHandle Closed;
 
-        readonly KAsyncLock _syncRoot = new KAsyncLock();
         // serial comprot
         protected SerialPort comport;
         // connection is closing due to peer
@@ -39,18 +33,19 @@ namespace KModbus.IO
         private CancellationTokenSource _backgroundCancellationSource = new CancellationTokenSource();
         private CancellationTokenSource _readCancellationSource = new CancellationTokenSource();
 
-        private IModbusFormatter _modbusFormatter;
         Task _taskRecv;
         Task _taskStop;
         Task _taskSendData;
+        private IModbusFormatter _modbusFormatter = new ModbusRtuFormatter();
         KAsyncQueue<Exception> _stopQueue = new KAsyncQueue<Exception>();
         object _lockStop = new object();
         KAsyncQueue<MsgComportRecv> _recvQueue = new KAsyncQueue<MsgComportRecv>();
         KAsyncQueue<byte[]> _sendQueue = new KAsyncQueue<byte[]>();
+        SerialPortOptions _config = new SerialPortOptions();
 
-        public ModbusRtuTransport(IModbusFormatter modbusFormatter)
+        public ModbusRtuTransport(SerialPortOptions config)
         {
-            _modbusFormatter = modbusFormatter;
+            _config = config;
         }
 
         protected void OnMessageRecieve(IModbusResponse msg)
@@ -92,32 +87,43 @@ namespace KModbus.IO
             await WaitForTask(_taskStop);
         }
 
-        public void Open(int baudRate, string portName, Parity parity, int databit, StopBits stopBit)
+        public async Task ConnectAsync()
         {
-            try
+            await Task.Run(() =>
             {
-                comport = new SerialPort();
-                comport.BaudRate = baudRate;
-                comport.PortName = portName;
-                comport.Parity = parity;
-                comport.DataBits = databit;
-                comport.StopBits = stopBit;
-                comport.Open();
-            }
-            catch (Exception ex)
-            {
-                comport.Dispose();
-                throw new Exception(ex.Message, ex.InnerException);
-            }
-            _recvQueue = new KAsyncQueue<MsgComportRecv>();
-            _sendQueue = new KAsyncQueue<byte[]>();
-            _readCancellationSource = new CancellationTokenSource();
-            _backgroundCancellationSource = new CancellationTokenSource();
-            var c = _backgroundCancellationSource.Token;
-            _stopQueue = new KAsyncQueue<Exception>();
-            _taskRecv = Task.Run(() => ProcessInflightRecieved(c, _readCancellationSource.Token), c);
-            _taskSendData = Task.Run(() => ProcessSendData(c), c);
-            _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
+                try
+                {
+                    comport = new SerialPort();
+                    comport.BaudRate = _config.Baudrate;
+                    comport.PortName = _config.PortName;
+                    comport.Parity = _config.Parity;
+                    comport.DataBits = _config.DataBit;
+                    comport.StopBits = _config.StopBit;
+                    comport.Open();
+                    comport.DiscardOutBuffer();
+                    comport.DiscardInBuffer();
+                }
+                catch (Exception ex)
+                {
+                    comport.Dispose();
+                    throw new Exception(ex.Message, ex.InnerException);
+                }
+                _recvQueue = new KAsyncQueue<MsgComportRecv>();
+                _sendQueue = new KAsyncQueue<byte[]>();
+                _readCancellationSource = new CancellationTokenSource();
+                _backgroundCancellationSource = new CancellationTokenSource();
+                var c = _backgroundCancellationSource.Token;
+                _stopQueue = new KAsyncQueue<Exception>();
+                _taskRecv = Task.Run(() => ProcessInflightRecieved(c, _readCancellationSource.Token), c);
+                _taskSendData = Task.Run(() => ProcessSendData(c), c);
+                _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
+            });
+        }
+
+        public Task SendDataAsync(IModbusRequest request)
+        {
+            SendData(request);
+            return Task.CompletedTask;
         }
 
         private async Task ProcessSendData(CancellationToken c)
@@ -140,18 +146,9 @@ namespace KModbus.IO
 
         }
 
-        public void Open(string portName, int baud)
+        public void SendData(IModbusRequest request)
         {
-            Open(baud, portName, Parity.None, 8, StopBits.One);
-        }
-
-        public void Open(string portName)
-        {
-            Open(9600, portName, Parity.None, 8, StopBits.One);
-        }
-
-        public void SendData(byte[] buf)
-        {
+            var buf = _modbusFormatter.Create(request);
             _sendQueue.Enqueue(buf);
         }
 
@@ -282,5 +279,6 @@ namespace KModbus.IO
             }
         }
 
+        
     }
 }

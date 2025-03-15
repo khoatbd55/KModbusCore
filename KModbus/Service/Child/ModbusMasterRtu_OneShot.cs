@@ -1,4 +1,5 @@
 ﻿using KModbus.Formatter;
+using KModbus.Interfaces;
 using KModbus.IO;
 using KModbus.Message;
 using KModbus.Service.Data;
@@ -22,7 +23,7 @@ namespace KModbus.Service
         AutoResetEvent waitHandleEvent;
         Queue eventQueue;
 
-        ModbusRtuTransport clientComport;
+        IMobusTransportAdapter clientComport;
 
 
         private int totalCommand;
@@ -38,7 +39,6 @@ namespace KModbus.Service
         IModbusResponse msgModbusRespond =new ReadCoilStatusResponse() ;
         List<Task> listTaskRun;
         CancellationTokenSource _backgroundCancelToken;
-        private IModbusFormatter _modbusFormatter;
 
         public delegate void ModbusMasterRecieveMsgEventHandle(object sender, ModbusMessage msg, int commandExcute,int totalCommand);
         public delegate void ModbusMasterNoRespondEventHandle(object sender, EventMsgHandle_NoResponse e);
@@ -130,36 +130,9 @@ namespace KModbus.Service
 
         }
 
-        async Task WaitForTaskAsync(Task task, Task sender)
+        public ModbusMasterRtu_OneShot(IMobusTransportAdapter clientComport)
         {
-            if (task == null)
-            {
-                return;
-            }
-
-            if (task == sender)
-            {
-                // Return here to avoid deadlocks, but first any eventual exception in the task
-                // must be handled to avoid not getting an unhandled task exception
-                if (!task.IsFaulted)
-                {
-                    return;
-                }
-
-                return;
-            }
-
-            try
-            {
-                await task.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        public ModbusMasterRtu_OneShot()
-        {
+            this.clientComport = clientComport;
             this.commandQueue = new Queue();
             this.eventQueue = new Queue();
 
@@ -167,12 +140,11 @@ namespace KModbus.Service
             this.waitHandleEvent = new AutoResetEvent(false);
             this.waitRespondCommand = new AutoResetEvent(false);
             this.listTaskRun = new List<Task>();
-            _modbusFormatter = new ModbusRtuFormatter();
         }
         
-        public void Run(string nameComport,List<CommandModbus_Service> list_command,int timeOut,int baudrate)
+        public async Task RunAsync(string nameComport,List<CommandModbus_Service> list_command,int timeOut,int baudrate)
         {
-            Comport_Init(nameComport, baudrate);
+            await Comport_Init(nameComport, baudrate);
             // add list command 
             foreach (var item_cmd in list_command)
             {
@@ -190,14 +162,14 @@ namespace KModbus.Service
             listTaskRun.Add(task);
             
         }
-        public void Run(string nameComport, List<CommandModbus_Service> list_command)
+        public async Task RunAsync(string nameComport, List<CommandModbus_Service> list_command)
         {
-            Run(nameComport, list_command, 3000,9600);
+            await RunAsync(nameComport, list_command, 3000,9600);
         }
 
-        public void Run(string nameComport,List<CommandModbus_Service> list_cmd,int baudrate)
+        public async Task RunAsync(string nameComport,List<CommandModbus_Service> list_cmd,int baudrate)
         {
-            Run(nameComport, list_cmd, 3000, baudrate);
+            await RunAsync(nameComport, list_cmd, 3000, baudrate);
         }
         private void EnqueueCommand(CommandModbus_Service cmd_data)
         {
@@ -221,7 +193,7 @@ namespace KModbus.Service
             CommandModbus_Service cmd = new CommandModbus_Service(requestModbus,CommandModbus_Service.CommandType.NoRepeat);
             EnqueueCommand(cmd);
         }
-        private void ProcessInflightCommand(CancellationToken c)
+        private async Task ProcessInflightCommand(CancellationToken c)
         {
             try
             {
@@ -252,8 +224,7 @@ namespace KModbus.Service
                                 switch (step)
                                 {
                                     case 0:// gửi lệnh
-                                        var frame = _modbusFormatter.Create(cmd_data.ModbusRequest);
-                                        clientComport.SendData(frame);
+                                        await clientComport.SendDataAsync(cmd_data.ModbusRequest);
                                         bool state = this.waitRespondCommand.WaitOne(this.TimeOut);
                                         if (state)// có phản hồi 
                                         {
@@ -353,10 +324,9 @@ namespace KModbus.Service
             }
         }
 
-        private void Comport_Init(string nameComport,int baudrate)
+        private async Task Comport_Init(string nameComport,int baudrate)
         {
-            clientComport = new ModbusRtuTransport(_modbusFormatter);
-            clientComport.Open(nameComport,baudrate);
+            await clientComport.ConnectAsync();
             clientComport.MessageRecieved += ClientComport_MessageRecieved1;
             clientComport.Closed += ClientComport_Closed;
             clientComport.OnExceptionOccur += ClientComport_OnExceptionOccur;

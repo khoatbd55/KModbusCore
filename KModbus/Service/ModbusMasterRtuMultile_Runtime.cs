@@ -1,6 +1,8 @@
 ﻿using KModbus.Config;
 using KModbus.Data;
+using KModbus.Data.Options;
 using KModbus.Extention;
+using KModbus.IO;
 using KModbus.Message;
 using KModbus.Service.Data.Mutile;
 using KModbus.Service.Event;
@@ -95,12 +97,13 @@ namespace KModbus.Service
             waitHandleEvent = new SemaphoreSlim(0);
         }
 
-        public async Task RunAsync(List<KModbusMasterOption> listOption)
+        public async Task RunAsync(List<KModbusMasterOption> listOption,List< SerialPortOptions> serialOptions)
         {
             List<Task> listTask = new List<Task>();
-            foreach(var option in listOption)
+            for(int i=0;i<listOption.Count;i++)
             {
-                ModbusMasterRtu_Runtime master_Runtime = new ModbusMasterRtu_Runtime();
+                var option=listOption[i];
+                ModbusMasterRtu_Runtime master_Runtime = new ModbusMasterRtu_Runtime(new ModbusRtuTransport(serialOptions[i]));
                 master_Runtime.OnClosedConnectionAsync += Master_Runtime_OnClosedConnectionAsync;
                 master_Runtime.OnExceptionAsync += Master_Runtime_OnExceptionAsync; ;
                 master_Runtime.OnNoRespondMessageAsync += Master_Runtime_OnNoRespondMessageAsync; ;
