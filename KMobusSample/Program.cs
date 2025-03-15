@@ -7,13 +7,23 @@ using KModbus.Service;
 using KModbus.Service.Model;
 
 
-var adapter = new ModbusRtuTransport(new SerialPortOptions()
+//var adapter = new ModbusRtuTransport(new SerialPortOptions()
+//{
+//    Baudrate=9600,
+//    DataBit=8,
+//    Parity=System.IO.Ports.Parity.None,
+//    PortName="COM4",
+//    StopBit=System.IO.Ports.StopBits.One,
+//});
+var adapter = new ModbusMqttTransport(new MqttModbusOptions()
 {
-    Baudrate=9600,
-    DataBit=8,
-    Parity=System.IO.Ports.Parity.None,
-    PortName="COM4",
-    StopBit=System.IO.Ports.StopBits.One,
+    DeviceId=101,
+    HeaderTopicRequest="mqtt/dac/request/",
+    HeaderTopicResponse="mqtt/dac/response/",
+    Host="localhost",
+    Password= "dac54321",
+    Port=19030,
+    UserName= "mqttdac"
 });
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime(adapter);
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
@@ -32,7 +42,7 @@ try
         DelayResponse=10,
         IsAutoReconnect=true,
         ListCmd=listCmd,
-        MsSleep=10,
+        MsSleep=0,
         WaitResponse=1500,
     });
     Console.WriteLine("modbus master running,auto reconnect");
@@ -45,14 +55,14 @@ catch (Exception ex)
 }
 
 
-
+int index = 0;
 while(true)
 {
-    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadHoldingRegisterRequest(100, 256, 13), new CancellationTokenSource().Token);
+    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(4, 0, 30), new CancellationTokenSource().Token);
     if (res.Type == KModbus.Data.EModbusCmdResponseType.Success)
     {
-        var request = (ReadHoldingRegisterRequest)res.ResultObj.Request;
-        var response = (ReadHoldingRegisterResponse)res.ResultObj.Response;
+        var request = (ReadInputRegisterRequest)res.ResultObj.Request;
+        var response = (ReadInputRegisterResponse)res.ResultObj.Response;
         var f_reg = response.Register;
         double ppmv = ((double)f_reg[7]);
         double pw = ((double)f_reg[8]) / 10;
@@ -60,10 +70,14 @@ while(true)
         
         double hpa = 1000000 * pw / ppmv + pw;
         double rh = pw * 100 / pws;
-        
-        Console.WriteLine("adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg));
+        index++;
+        Console.WriteLine("{2}-adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg),index);
+        if(index%1000==0)
+        {
+            Console.Clear();
+        }    
     }
-    await Task.Delay(1000);
+    await Task.Delay(1);
 }    
 Task ModbusMaster_OnClosedConnectionAsync(KModbus.Service.Event.Child.MsgClosedConnectionEventArgs arg)
 {
@@ -73,7 +87,7 @@ Task ModbusMaster_OnClosedConnectionAsync(KModbus.Service.Event.Child.MsgClosedC
 
 Task ModbusMaster_OnExceptionAsync(KModbus.Service.Event.Child.MsgExceptionEventArgs arg)
 {
-    Console.WriteLine("modbus master exception .detail {0}",arg.Ex.Message); 
+    Console.WriteLine("modbus master exception .detail {0}",arg.Ex?.Message); 
     return Task.CompletedTask;
 }
 

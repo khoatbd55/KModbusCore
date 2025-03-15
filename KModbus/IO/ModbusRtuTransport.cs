@@ -43,11 +43,6 @@ namespace KModbus.IO
         KAsyncQueue<byte[]> _sendQueue = new KAsyncQueue<byte[]>();
         SerialPortOptions _config = new SerialPortOptions();
 
-        public ModbusRtuTransport()
-        {
-            
-        }
-
         public ModbusRtuTransport(SerialPortOptions config)
         {
             _config = config;
