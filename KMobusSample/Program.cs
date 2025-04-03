@@ -44,6 +44,7 @@ try
         ListCmd=listCmd,
         MsSleep=0,
         WaitResponse=1500,
+        Retry=1
     });
     Console.WriteLine("modbus master running,auto reconnect");
 }

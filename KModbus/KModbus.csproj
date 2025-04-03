@@ -11,7 +11,7 @@
 	  <Copyright>@Khoand</Copyright>
 	  <PackageTags>ModbusNet</PackageTags>
 	  <Description>library modbus master serial port</Description>
-	  <Version>1.0.9</Version>
+	  <Version>1.0.10</Version>
   </PropertyGroup>
 
   <ItemGroup>
