@@ -16,6 +16,7 @@ namespace KModbus.Config
         public int DelayResponse { get; set; } = 10;
         public bool IsAutoReconnect { get; set; } = true;
         public int WaitResponse { get; set; } = 1000;
+        public int Retry { get; set; } = 1;
 
         public KModbusMasterOption( int msSleep, List<CommandModbus_Service> listCmd, int delayResponse)
         {

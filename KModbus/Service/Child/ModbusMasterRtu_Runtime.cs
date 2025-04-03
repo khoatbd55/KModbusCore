@@ -487,7 +487,7 @@ namespace KModbus.Service
                                                 else
                                                 {
                                                     register.Dispose();// 
-                                                    if (++retry >= 2)
+                                                    if (++retry >= _option.Retry)
                                                     {
                                                         step = 2;// không có phản hồi từ dưới thiết bị gửi lên
                                                         this.IsConnected = false;
