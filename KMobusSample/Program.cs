@@ -7,24 +7,24 @@ using KModbus.Service;
 using KModbus.Service.Model;
 
 
-//var adapter = new ModbusRtuTransport(new SerialPortOptions()
-//{
-//    Baudrate=9600,
-//    DataBit=8,
-//    Parity=System.IO.Ports.Parity.None,
-//    PortName="COM4",
-//    StopBit=System.IO.Ports.StopBits.One,
-//});
-var adapter = new ModbusMqttTransport(new MqttModbusOptions()
+var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
 {
-    DeviceId=101,
-    HeaderTopicRequest="mqtt/dac/request/",
-    HeaderTopicResponse="mqtt/dac/response/",
-    Host="localhost",
-    Password= "dac54321",
-    Port=19030,
-    UserName= "mqttdac"
+    Baudrate = 9600,
+    DataBit = 8,
+    Parity = System.IO.Ports.Parity.None,
+    PortName = "COM11",
+    StopBit = System.IO.Ports.StopBits.One,
 });
+//var adapter = new ModbusMqttTransport(new MqttModbusOptions()
+//{
+//    DeviceId=101,
+//    HeaderTopicRequest="mqtt/dac/request/",
+//    HeaderTopicResponse="mqtt/dac/response/",
+//    Host="localhost",
+//    Password= "dac54321",
+//    Port=19030,
+//    UserName= "mqttdac"
+//});
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime(adapter);
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
 modbusMaster.OnNoRespondMessageAsync += ModbusMaster_OnNoRespondMessageAsync;
