@@ -52,7 +52,7 @@ var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
     Baudrate = 9600,
     DataBit = 8,
     Parity = System.IO.Ports.Parity.None,
-    PortName = "COM11",
+    PortName = "/dev/ttyAMA0",
     StopBit = System.IO.Ports.StopBits.One,
 });
 
