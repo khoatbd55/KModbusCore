@@ -125,7 +125,7 @@ namespace KModbus.IO
                 _backgroundCancellationSource = new CancellationTokenSource();
                 var c = _backgroundCancellationSource.Token;
                 _stopQueue = new KAsyncQueue<Exception>();
-                _taskRecv = Task.Run(() => ProcessInflightRecieved(c, _readCancellationSource.Token), c);
+                _taskRecv = Task.Run(() => ProcessInflightRecieved2(c, _readCancellationSource.Token), c);
                 _taskSendData = Task.Run(() => ProcessSendData(c), c);
                 _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
             });
@@ -146,7 +146,9 @@ namespace KModbus.IO
                     var itemQueue = await _sendQueue.TryDequeueAsync(c).ConfigureAwait(false);
                     if (!c.IsCancellationRequested && itemQueue.IsSuccess)
                     {
-                        await comport.BaseStream.WriteAsync(itemQueue.Item, 0, itemQueue.Item.Length, c).ConfigureAwait(false);
+                        //comport.Write(itemQueue.Item, 0, itemQueue.Item.Length);
+                        comport.BaseStream.Write(itemQueue.Item, 0, itemQueue.Item.Length);
+                        //await comport.BaseStream.WriteAsync(itemQueue.Item, 0, itemQueue.Item.Length, c).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -260,6 +262,48 @@ namespace KModbus.IO
             }
         }
 
+        protected void ProcessInflightRecieved2(CancellationToken c, CancellationToken cRead)
+        {
+            try
+            {
+                while (!c.IsCancellationRequested)
+                {
+                    byte[] frameStart = Read(ResponseFrameStartLength);
+                    if (frameStart.Length == 4)
+                    {
+                        var byteToRead = MessageHandle_Service.GetRtuRequestBytesToRead(frameStart);
+                        if (byteToRead > 0 && byteToRead < 255)
+                        {
+                            byte[] frameEnd = Read(byteToRead);
+                            byte[] frame = MessageHandle_Service.ConcatFrame(frameStart, frameEnd);
+                            try
+                            {
+                                var msgRespond = _modbusFormatter.DecodeMessage(frame);// dữ liệu phản hồi
+                                this.OnMessageRecieve(msgRespond);
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new FrameModbusDecodeException(ex.Message, ex);
+                            }
+                        }
+                        else
+                        {
+                            throw new FrameModbusRecieveException("frame modbus not correct,body frame difference 0 and 255");
+                        }
+                    }
+                    else
+                    {
+                        throw new FrameModbusRecieveException("frame modbus not correct ,header < 4 bytes");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                this.EventExceptionOccur(ex);
+                this.OnConnectionClosing(ex);
+            }
+        }
+
         public async Task<byte[]> ReadAsync(int count, CancellationToken c)
         {
             byte[] frameBytes = new byte[count];
@@ -267,6 +311,23 @@ namespace KModbus.IO
             while (numBytesRead != count && !c.IsCancellationRequested)
             {
                 var result = await comport.BaseStream.ReadAsync(frameBytes, numBytesRead, count - numBytesRead, c).ConfigureAwait(false);
+                if (result == 0)
+                    break;
+                else
+                {
+                    numBytesRead += result;
+                }
+            }
+            return frameBytes;
+        }
+
+        public byte[] Read(int count)
+        {
+            byte[] frameBytes = new byte[count];
+            int numBytesRead = 0;
+            while (numBytesRead != count)
+            {
+                var result = comport.BaseStream.Read(frameBytes, numBytesRead, count - numBytesRead);
                 if (result == 0)
                     break;
                 else
