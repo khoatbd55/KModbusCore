@@ -31,7 +31,7 @@ namespace KModbus.Data.Options
         public List<System.Net.Security.SslApplicationProtocol> ApplicationProtocols { get; set; }
 #endif
 
-#if NET48 || NETCOREAPP3_1 || NET5 || NET6
+#if NET48 || NETCOREAPP3_1 || NET5 || NET6 || NET7 || NET8 || NET9 
         public SslProtocols SslProtocol { get; set; } = SslProtocols.Tls12 | SslProtocols.Tls13;
 #else
         public SslProtocols SslProtocol { get; set; } = SslProtocols.Tls12 | (SslProtocols)0x00003000 /*Tls13*/;

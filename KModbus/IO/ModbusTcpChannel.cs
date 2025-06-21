@@ -19,7 +19,7 @@ namespace KModbus.IO
     internal class ModbusTcpChannel: IModbusChannel
     {
         readonly Action _disposeAction;
-        readonly ModbusClientTcpOptions _tcpOptions;
+        readonly ModbusClientTcpChannelOptions _tcpOptions;
 
         Stream _stream;
         public ModbusTcpChannel()
@@ -27,7 +27,7 @@ namespace KModbus.IO
             _disposeAction = Dispose;
         }
 
-        public ModbusTcpChannel(ModbusClientTcpOptions options) : this()
+        public ModbusTcpChannel(ModbusClientTcpChannelOptions options) : this()
         {
             _tcpOptions = options;
             IsSecureConnection = options.TlsOptions?.UseTls == true;
