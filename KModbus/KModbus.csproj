@@ -10,8 +10,8 @@
 	  <RepositoryUrl>https://github.com/khoatbd55/KModbusCore.git</RepositoryUrl>
 	  <Copyright>@Khoand</Copyright>
 	  <PackageTags>ModbusNet</PackageTags>
-	  <Description>library modbus master serial port</Description>
-	  <Version>1.0.12</Version>
+	  <Description>library modbus master </Description>
+	  <Version>1.0.13</Version>
   </PropertyGroup>
 	
 	

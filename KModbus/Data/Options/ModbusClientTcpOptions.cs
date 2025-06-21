@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -9,27 +8,16 @@ namespace KModbus.Data.Options
 {
     public class ModbusClientTcpOptions
     {
-        public AddressFamily AddressFamily { get; set; } = AddressFamily.Unspecified;
-
-        public int BufferSize { get; set; } = 8192;
-
-        public bool? DualMode { get; set; }
-
-        public LingerOption LingerState { get; set; } = new LingerOption(true, 0);
-
-        public bool NoDelay { get; set; } = true;
-        public int Port { get; set; }
-        public string Server { get; set; }
-        public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
-
-#pragma warning disable CS0108 // Member hides inherited member; missing new keyword
-        public ModbusClientTlsOptions TlsOptions { get; set; } = new ModbusClientTlsOptions();
-#pragma warning restore CS0108 // Member hides inherited member; missing new keyword
-
+        public ushort TransactionId { get; set; }
+        public int TimeOutConnect { get; set; }
+        public EModbusPacketProtocal PacketProtocal { get; set; }
+        public ModbusClientTcpChannelOptions TcpOption { get; set; }
         public ModbusClientTcpOptions()
         {
-            Port = 502;
-            Server = "127.0.0.1";
+            TransactionId = 1;
+            PacketProtocal = EModbusPacketProtocal.TcpIp;
+            TcpOption = new ModbusClientTcpChannelOptions();
+            TimeOutConnect = 30;
         }
 
     }

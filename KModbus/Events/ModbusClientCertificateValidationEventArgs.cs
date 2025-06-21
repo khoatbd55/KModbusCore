@@ -15,6 +15,6 @@ namespace KModbus.Events
         public X509Certificate Certificate { get; set; }
         public X509Chain Chain { get; set; }
         public SslPolicyErrors SslPolicyErrors { get; set; }
-        public ModbusClientTcpOptions Options { get; set; }
+        public ModbusClientTcpChannelOptions Options { get; set; }
     }
 }

@@ -7,14 +7,14 @@ using KModbus.Service;
 using KModbus.Service.Model;
 
 
-var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
-{
-    Baudrate = 9600,
-    DataBit = 8,
-    Parity = System.IO.Ports.Parity.None,
-    PortName = "COM11",
-    StopBit = System.IO.Ports.StopBits.One,
-});
+//var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
+//{
+//    Baudrate = 9600,
+//    DataBit = 8,
+//    Parity = System.IO.Ports.Parity.None,
+//    PortName = "COM11",
+//    StopBit = System.IO.Ports.StopBits.One,
+//});
 //var adapter = new ModbusMqttTransport(new MqttModbusOptions()
 //{
 //    DeviceId=101,
@@ -25,6 +25,16 @@ var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
 //    Port=19030,
 //    UserName= "mqttdac"
 //});
+var tcpOption = new ModbusClientTcpChannelOptions();
+tcpOption.Server = "127.0.0.1";
+tcpOption.Port = 502;
+var adapter = new ModbusTcpClientTransport(new ModbusClientTcpOptions()
+{
+    PacketProtocal = EModbusPacketProtocal.TcpIp,
+    TcpOption = tcpOption,
+    TimeOutConnect=30,
+    TransactionId=1
+});
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime(adapter);
 modbusMaster.OnRecievedMessageAsync += ModbusMaster_OnRecievedMessageAsync;
 modbusMaster.OnNoRespondMessageAsync += ModbusMaster_OnNoRespondMessageAsync;
@@ -59,7 +69,7 @@ catch (Exception ex)
 int index = 0;
 while(true)
 {
-    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(4, 0, 30), new CancellationTokenSource().Token);
+    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(1, 0, 30), new CancellationTokenSource().Token);
     if (res.Type == KModbus.Data.EModbusCmdResponseType.Success)
     {
         var request = (ReadInputRegisterRequest)res.ResultObj.Request;
@@ -78,7 +88,7 @@ while(true)
             Console.Clear();
         }    
     }
-    await Task.Delay(1);
+    await Task.Delay(100);
 }    
 Task ModbusMaster_OnClosedConnectionAsync(KModbus.Service.Event.Child.MsgClosedConnectionEventArgs arg)
 {
