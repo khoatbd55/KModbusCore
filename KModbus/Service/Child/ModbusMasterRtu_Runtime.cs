@@ -166,7 +166,7 @@ namespace KModbus.Service
             this._msSleep = option.MsSleep;
             this._delayResponse = option.DelayResponse;
             await Comport_InitAsync();
-            Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
+            
             _backgroundCancelTokenSource = new CancellationTokenSource();
             _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
             _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
@@ -185,7 +185,34 @@ namespace KModbus.Service
             _taskEvent = Task.Run(() => ProcessInflightEvent(c), c);
             _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
             _taskAutoReconnect = Task.Run(() => ProcessAutoReconnect(c), c);
+            Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
             Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Opened);
+            WriteLog(EModbusLogType.Infomation, "modbus running");
+        }
+
+        public void RunAutoConnectAsync(KModbusMasterOption option)
+        {
+            this._option = option;
+            this._msSleep = option.MsSleep;
+            this._delayResponse = option.DelayResponse;
+            _backgroundCancelTokenSource = new CancellationTokenSource();
+            _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
+            _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
+            if (option.ListCmd != null)
+            {
+                foreach (var item in option.ListCmd)
+                {
+                    EnqueueCommand(item, ECmdPriority.Default);
+                }
+            }
+            CancellationToken c = _backgroundCancelTokenSource.Token;
+            _stopQueue = new KAsyncQueue<Exception>();
+            _sendCmdCancelTokenSource = new CancellationTokenSource();
+            var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
+            _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
+            _taskEvent = Task.Run(() => ProcessInflightEvent(c), c);
+            _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
+            _taskAutoReconnect = Task.Run(() => ProcessAutoReconnect(c), c);
             WriteLog(EModbusLogType.Infomation, "modbus running");
         }
 
@@ -216,6 +243,7 @@ namespace KModbus.Service
                         // cố gắng mở lại kết nối
                         await Comport_InitAsync();
                         Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
+                        Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Opened);
                         _sendCmdCancelTokenSource = new CancellationTokenSource();
                         var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
                         _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
