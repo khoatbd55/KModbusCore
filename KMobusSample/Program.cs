@@ -5,6 +5,7 @@ using KModbus.IO;
 using KModbus.Message;
 using KModbus.Service;
 using KModbus.Service.Model;
+using KUtilities.ConvertExtentions;
 
 
 //var adapter = new ModbusRtuLinuxTransport(new SerialPortOptions()
@@ -26,13 +27,14 @@ using KModbus.Service.Model;
 //    UserName= "mqttdac"
 //});
 var tcpOption = new ModbusClientTcpChannelOptions();
-tcpOption.Server = "127.0.0.1";
+tcpOption.Server = "192.168.144.201";
 tcpOption.Port = 502;
+tcpOption.Timeout = TimeSpan.FromSeconds(10);
 var adapter = new ModbusTcpClientTransport(new ModbusClientTcpOptions()
 {
     PacketProtocal = EModbusPacketProtocal.TcpIp,
     TcpOption = tcpOption,
-    TimeOutConnect=30,
+    TimeOutConnect=10,
     TransactionId=1
 });
 ModbusMasterRtu_Runtime modbusMaster = new ModbusMasterRtu_Runtime(adapter);
@@ -47,15 +49,26 @@ List<CommandModbus_Service> listCmd = new List<CommandModbus_Service>();
 Console.WriteLine("try openning comport");
 try
 {
+    //modbusMaster.RunAutoConnectAsync(new KModbus.Config.KModbusMasterOption()
+    //{
+    //    DelayResponse = 10,
+    //    IsAutoReconnect = true,
+    //    ListCmd = listCmd,
+    //    MsSleep = 0,
+    //    WaitResponse = 1500,
+    //    Retry = 1
+    //});
+
     await modbusMaster.RunAsync(new KModbus.Config.KModbusMasterOption()
     {
-        DelayResponse=10,
-        IsAutoReconnect=true,
-        ListCmd=listCmd,
-        MsSleep=0,
-        WaitResponse=1500,
-        Retry=1
+        DelayResponse = 10,
+        IsAutoReconnect = true,
+        ListCmd = listCmd,
+        MsSleep = 0,
+        WaitResponse = 1500,
+        Retry = 1
     });
+
     Console.WriteLine("modbus master running,auto reconnect");
 }
 catch (Exception ex)
@@ -69,26 +82,50 @@ catch (Exception ex)
 int index = 0;
 while(true)
 {
-    var res= await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(1, 0, 30), new CancellationTokenSource().Token);
-    if (res.Type == KModbus.Data.EModbusCmdResponseType.Success)
+    try
     {
-        var request = (ReadInputRegisterRequest)res.ResultObj.Request;
-        var response = (ReadInputRegisterResponse)res.ResultObj.Response;
-        var f_reg = response.Register;
-        double ppmv = ((double)f_reg[7]);
-        double pw = ((double)f_reg[8]) / 10;
-        double pws = ((double)f_reg[9]) / 10;
-        
-        double hpa = 1000000 * pw / ppmv + pw;
-        double rh = pw * 100 / pws;
-        index++;
-        Console.WriteLine("{2}-adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg),index);
-        if(index%1000==0)
+        var res1 = await modbusMaster.SendCommandNoRepeatAsync(new ReadHoldingRegisterRequest(241, 0, 4), new CancellationTokenSource().Token);
+        if (res1.Type == KModbus.Data.EModbusCmdResponseType.Success)
         {
-            Console.Clear();
-        }    
+            var request = (ReadHoldingRegisterRequest)res1.ResultObj.Request;
+            var response = (ReadHoldingRegisterResponse)res1.ResultObj.Response;
+            var f_reg = response.Register;
+            var b_reg = ConvertReg.ConvertArrayUint16ToByte(response.Register);
+            int idx = 0;
+            var RH = ConvertVariable.BytesToFloat(b_reg, ref idx);
+            var TEMP = ConvertVariable.BytesToFloat(b_reg, ref idx);
+            Console.WriteLine("RH:{0},TEMP:{1}", RH, TEMP);
+            index++;
+            //Console.WriteLine("{2}-adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg),index);
+            if (index % 1000 == 0)
+            {
+                Console.Clear();
+            }
+        }
+        var res2 = await modbusMaster.SendCommandNoRepeatAsync(new ReadHoldingRegisterRequest(240, 42, 2), new CancellationTokenSource().Token);
+        if (res2.Type == KModbus.Data.EModbusCmdResponseType.Success)
+        {
+            var request = (ReadHoldingRegisterRequest)res2.ResultObj.Request;
+            var response = (ReadHoldingRegisterResponse)res2.ResultObj.Response;
+            var f_reg = response.Register;
+            var b_reg = ConvertReg.ConvertArrayUint16ToByte(response.Register);
+            int idx = 0;
+            var Pressire = ConvertVariable.BytesToFloat(b_reg, ref idx);
+            Console.WriteLine("PRessure:{0}", Pressire);
+            index++;
+            //Console.WriteLine("{2}-adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg), index);
+            if (index % 1000 == 0)
+            {
+                Console.Clear();
+            }
+        }
+        
     }
-    await Task.Delay(100);
+    catch (Exception ex)
+    {
+        Console.WriteLine("modbus send exception:{0}",ex.Message); 
+    }
+    await Task.Delay(500);
 }    
 Task ModbusMaster_OnClosedConnectionAsync(KModbus.Service.Event.Child.MsgClosedConnectionEventArgs arg)
 {

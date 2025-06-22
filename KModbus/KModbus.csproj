@@ -11,7 +11,7 @@
 	  <Copyright>@Khoand</Copyright>
 	  <PackageTags>ModbusNet</PackageTags>
 	  <Description>library modbus master </Description>
-	  <Version>1.0.13</Version>
+	  <Version>1.0.14</Version>
   </PropertyGroup>
 	
 	
