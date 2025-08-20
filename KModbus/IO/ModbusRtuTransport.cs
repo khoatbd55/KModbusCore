@@ -99,6 +99,8 @@ namespace KModbus.IO
                     comport.Parity = _config.Parity;
                     comport.DataBits = _config.DataBit;
                     comport.StopBits = _config.StopBit;
+                    comport.DtrEnable = _config.DtrEnable;
+                    comport.RtsEnable = _config.RtsEnable;
                     comport.Open();
                     comport.DiscardOutBuffer();
                     comport.DiscardInBuffer();
@@ -136,6 +138,7 @@ namespace KModbus.IO
                     if (!c.IsCancellationRequested && itemQueue.IsSuccess)
                     {
                         await comport.BaseStream.WriteAsync(itemQueue.Item, 0, itemQueue.Item.Length, c).ConfigureAwait(false);
+                        //
                     }
                 }
                 catch (Exception ex)
