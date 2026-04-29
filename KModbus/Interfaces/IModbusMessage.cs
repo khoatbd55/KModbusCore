@@ -10,6 +10,5 @@ namespace KModbus.Interfaces
     {
         byte SlaverAddress { get; set; }
         byte FuntionCode { get;}
-
     }
 }
