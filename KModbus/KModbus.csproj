@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-	  <TargetFrameworks>net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+	  <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
 	  <TargetFrameworks Condition=" '$(OS)' == 'Windows_NT' ">$(TargetFrameworks);net471;net472</TargetFrameworks>
 	  <Nullable>disable</Nullable>
 	  <PackageId>KModbus</PackageId>
@@ -11,13 +11,13 @@
 	  <Copyright>@Khoand</Copyright>
 	  <PackageTags>ModbusNet</PackageTags>
 	  <Description>library modbus master </Description>
-	  <Version>1.0.15</Version>
+	  <Version>1.0.16</Version>
   </PropertyGroup>
 	
 	
 
   <ItemGroup>
-	  <PackageReference Include="KUtilities" Version="1.0.0" />
+	  <PackageReference Include="KUtilities" Version="1.0.1" />
 	  <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
 	  
   </ItemGroup>
@@ -56,6 +56,14 @@
 		</PackageReference>
 	</ItemGroup>
 
+	<ItemGroup Condition="'$(TargetFramework)'=='net10.0'">
+		<PackageReference Include="System.IO.Ports" Version="10.0.12" />
+		<PackageReference Include="Mono.IO.Ports">
+			<Version>0.0.1</Version>
+		</PackageReference>
+	</ItemGroup>
+	
+
 	<PropertyGroup Condition="'$(TargetFramework)' == 'net6.0'">
 		<DefineConstants>NETCOREONLY</DefineConstants>
 	</PropertyGroup>
@@ -69,6 +77,10 @@
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+		<DefineConstants>NETCOREONLY</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<DefineConstants>NETCOREONLY</DefineConstants>
 	</PropertyGroup>
 	

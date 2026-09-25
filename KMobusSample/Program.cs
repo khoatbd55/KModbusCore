@@ -10,12 +10,12 @@ using KUtilities.ConvertExtentions;
 
 var adapter = new ModbusRtuTransport(new SerialPortOptions()
 {
-    Baudrate = 115200,
+    Baudrate = 19200,
     DataBit = 8,
     Parity = System.IO.Ports.Parity.None,
-    PortName = "COM9",
+    PortName = "COM1",
     StopBit = System.IO.Ports.StopBits.One,
-    DtrEnable = false,
+    DtrEnable = true,
     RtsEnable = false
 });
 //var adapter = new ModbusMqttTransport(new MqttModbusOptions()
@@ -80,30 +80,26 @@ catch (Exception ex)
     return;
 }
 
-
 int index = 0;
 while(true)
 {
     try
     {
-        var res1 = await modbusMaster.SendCommandNoRepeatAsync(new ReadHoldingRegisterRequest(10, 10, 77), new CancellationTokenSource().Token);
-        if (res1.Type == KModbus.Data.EModbusCmdResponseType.Success)
+        var resDataReady = await modbusMaster.SendCommandNoRepeatAsync(new ReadInputRegisterRequest(15, 0, 16), new CancellationToken());
+        if(resDataReady.Type==KModbus.Data.EModbusCmdResponseType.Success)
         {
-            var request = (ReadHoldingRegisterRequest)res1.ResultObj.Request;
-            var response = (ReadHoldingRegisterResponse)res1.ResultObj.Response;
-            var f_reg = response.Register;
-            //var b_reg = ConvertReg.ConvertArrayUint16ToByte(response.Register);
-            //int idx = 0;
-            //var RH = ConvertVariable.BytesToFloat(b_reg, ref idx);
-            //var TEMP = ConvertVariable.BytesToFloat(b_reg, ref idx);
-            //Console.WriteLine("RH:{0},TEMP:{1}", RH, TEMP);
+            var response = (ReadInputRegisterResponse)resDataReady.ResultObj.Response;            
+            var f_reg = ConvertReg.ConvertArrayUin16ToFloat(response.Register);
             index++;
-            Console.WriteLine("{2}-adr input request {0} ,register response: [{1}]", request.AddressRegister, string.Join(", ", f_reg),index);
+            Console.WriteLine("Ref:{0},INA0:{1},INA1:{2},INA2:{3}", f_reg[0], f_reg[1], f_reg[2], f_reg[3]);
+            Console.WriteLine("DAC1:{0},DAC2:{1},DAC2:{2},DAC3:{3}\r\n", f_reg[4], f_reg[5], f_reg[6], f_reg[7]);
             if (index % 1000 == 0)
             {
                 Console.Clear();
             }
-        }
+
+        }    
+        
         
     }
     catch (Exception ex)

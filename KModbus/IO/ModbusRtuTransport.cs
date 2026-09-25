@@ -99,7 +99,7 @@ namespace KModbus.IO
                     comport.Parity = _config.Parity;
                     comport.DataBits = _config.DataBit;
                     comport.StopBits = _config.StopBit;
-                    comport.DtrEnable = _config.DtrEnable;
+                    comport.DtrEnable =_config.DtrEnable;
                     comport.RtsEnable = _config.RtsEnable;
                     comport.Open();
                     comport.DiscardOutBuffer();
