@@ -1,4 +1,4 @@
-﻿using KModbus.Config;
+using KModbus.Config;
 using KModbus.Data;
 using KModbus.Data.Model;
 using KModbus.Data.Services;
@@ -28,11 +28,10 @@ using System.Threading.Tasks;
 
 namespace KModbus.Service
 {
-    public class ModbusMasterRtu_Runtime : IModbusMaster
+    public class ModbusMasterRtu_Runtime : IModbusMaster, IDisposable
     {
         public delegate void ModbusMasterLogEventHandle(object sender, ModbusLogEventArgs e);
         public event ModbusMasterLogEventHandle OnLog;
-
 
         readonly KAsyncEvent<MsgResponseModbus_EventArg> _recievedMessageEvent = new KAsyncEvent<MsgResponseModbus_EventArg>();
         readonly KAsyncEvent<MsgNoResponseModbus_EventArg> _noRespondMessageEvent = new KAsyncEvent<MsgNoResponseModbus_EventArg>();
@@ -63,51 +62,52 @@ namespace KModbus.Service
             remove => _exceptionEvent.RemoveHandler(value);
         }
 
-        KPriorityQueueAsync<CommandModbus_Service> _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
-        KAsyncQueue<EventMsgHandle_Base> _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
+        private KPriorityQueueAsync<CommandModbus_Service> _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
+        private KAsyncQueue<EventMsgHandle_Base> _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
 
-        SemaphoreSlim _waitHandleSleep;
-        SemaphoreSlim _waitCheckCountQueue;
-
-        IMobusTransportAdapter _clientAdapter;
+        private readonly SemaphoreSlim _wakeUpSleepSignal = new SemaphoreSlim(0, 1);
+        private readonly IMobusTransportAdapter _clientAdapter;
 
         private int _msSleep;
         private int _delayResponse;
         private int _totalCommandRepeat;
         private int _isComportOpened = 0;
 
-        KModbusMasterOption _option;
+        private KModbusMasterOption _option;
 
-        CancellationTokenSource _backgroundCancelTokenSource = new CancellationTokenSource();
-        CancellationTokenSource _sendCmdCancelTokenSource = new CancellationTokenSource();
-        int _connectstatus = (int)(EModbusConnectStatus.Closed);
-        List<TaskCompleteSouceRpcModel> _listTaskRpc = new List<TaskCompleteSouceRpcModel>();
-        KAsyncTaskCompletionSource<IModbusResponse> _taskCompleteSouceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
-        Task _taskStop;
-        KAsyncQueue<Exception> _stopQueue = new KAsyncQueue<Exception>();
+        private CancellationTokenSource _backgroundCancelTokenSource = new CancellationTokenSource();
+        private CancellationTokenSource _sendCmdCancelTokenSource = new CancellationTokenSource();
+        private CancellationTokenSource _linkedCmdCancelTokenSource;
+        private int _connectstatus = (int)EModbusConnectStatus.Closed;
+        private readonly List<TaskCompleteSouceRpcModel> _listTaskRpc = new List<TaskCompleteSouceRpcModel>();
+        private KAsyncTaskCompletionSource<IModbusResponse> _taskCompleteSourceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
+        private IModbusRequest _currentInflightRequest;
+        private Task _taskStop;
+        private KAsyncQueue<Exception> _stopQueue = new KAsyncQueue<Exception>();
 
-        Task _taskCommand;
-        Task _taskEvent;
-        Task _taskAutoReconnect;
-        object _lockStop = new object();
-        object _syncAutoReconnect = new object();
-        object _syncListTaskRpc = new object();
-        readonly object _syncCommand = new object();
-        readonly object _syncMessage = new object();
-        readonly object _syncWaitHandleSleep = new object();
+        private Task _taskCommand;
+        private Task _taskEvent;
+        private Task _taskAutoReconnect;
+        private readonly object _lockStop = new object();
+        private readonly object _syncAutoReconnect = new object();
+        private readonly object _syncListTaskRpc = new object();
+        private readonly object _syncMessage = new object();
+        private readonly object _syncWaitHandleSleep = new object();
 
         public string NameComport 
         {
             get
             {
-                if (_option != null)
-                    return _option.NameId;
-                else
-                    return "";
+                return _option?.NameId ?? "";
             }
-        }// xem lại cái này
+        }
 
-        public bool IsConnected { get; set; }
+        private volatile bool _isConnected;
+        public bool IsConnected
+        {
+            get => _isConnected;
+            set => _isConnected = value;
+        }
 
         public int TotalQueueCommand
         {
@@ -126,20 +126,19 @@ namespace KModbus.Service
         {
             Priority = 0, // càng thấp càng ưu tiên cao
             Default,
-
         }
 
         private void OnClosing(Exception e)
         {
             lock (_lockStop)
             {
-                if (!_backgroundCancelTokenSource.Token.IsCancellationRequested)
+                if (_backgroundCancelTokenSource != null && !_backgroundCancelTokenSource.Token.IsCancellationRequested)
                 {
                     _stopQueue.Enqueue(e);
                 }
             }
-
         }
+
         public void Disconnect()
         {
             this.OnClosing(new Exception("disconnect by require"));
@@ -155,38 +154,66 @@ namespace KModbus.Service
         {
             this._clientAdapter = adapter;
             _listTaskRpc = new List<TaskCompleteSouceRpcModel>();
-            this._waitHandleSleep = new SemaphoreSlim(0);
-            this._waitCheckCountQueue = new SemaphoreSlim(0);
-            _taskCompleteSouceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
+            _taskCompleteSourceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
         }
 
         public async Task RunAsync(KModbusMasterOption option)
         {
+            if (this.IsRunning)
+            {
+                await DisconnectAsync().ConfigureAwait(false);
+            }
+
             this._option = option;
             this._msSleep = option.MsSleep;
             this._delayResponse = option.DelayResponse;
-            await Comport_InitAsync();
-            
-            _backgroundCancelTokenSource = new CancellationTokenSource();
+
+            _totalCommandRepeat = 0;
             _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
             _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
+
             if (option.ListCmd != null)
             {
-                foreach (var item in option.ListCmd)
+                lock (_commandQueue)
                 {
-                    EnqueueCommand(item, ECmdPriority.Default);
+                    foreach (var item in option.ListCmd)
+                    {
+                        if (item.Type == CommandModbus_Service.CommandType.Repeat)
+                            this._totalCommandRepeat++;
+                        _commandQueue.Enqueue(item, (int)ECmdPriority.Default);
+                    }
                 }
             }
+
+            await Comport_InitAsync().ConfigureAwait(false);
+            
+            Interlocked.Exchange(ref _isComportOpened, 1);
+            Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Opened);
+
+            lock (_lockStop)
+            {
+                _backgroundCancelTokenSource?.Dispose();
+                _backgroundCancelTokenSource = new CancellationTokenSource();
+            }
             CancellationToken c = _backgroundCancelTokenSource.Token;
+
             _stopQueue = new KAsyncQueue<Exception>();
-            _sendCmdCancelTokenSource = new CancellationTokenSource();
-            var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
-            _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
+
+            lock (_syncAutoReconnect)
+            {
+                _linkedCmdCancelTokenSource?.Dispose();
+                _sendCmdCancelTokenSource?.Dispose();
+                _sendCmdCancelTokenSource = new CancellationTokenSource();
+                _linkedCmdCancelTokenSource = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
+            }
+
+            _taskCommand = Task.Run(() => ProcessInflightCommand(_linkedCmdCancelTokenSource.Token), _linkedCmdCancelTokenSource.Token);
             _taskEvent = Task.Run(() => ProcessInflightEvent(c), c);
             _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
-            _taskAutoReconnect = Task.Run(() => ProcessAutoReconnect(c), c);
-            Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
-            Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Opened);
+            if (option.IsAutoReconnect)
+            {
+                _taskAutoReconnect = Task.Run(() => ProcessAutoReconnect(c), c);
+            }
             WriteLog(EModbusLogType.Infomation, "modbus running");
         }
 
@@ -195,25 +222,46 @@ namespace KModbus.Service
             this._option = option;
             this._msSleep = option.MsSleep;
             this._delayResponse = option.DelayResponse;
-            _backgroundCancelTokenSource = new CancellationTokenSource();
+
+            _totalCommandRepeat = 0;
             _commandQueue = new KPriorityQueueAsync<CommandModbus_Service>();
             _eventQueue = new KAsyncQueue<EventMsgHandle_Base>();
+
             if (option.ListCmd != null)
             {
-                foreach (var item in option.ListCmd)
+                lock (_commandQueue)
                 {
-                    EnqueueCommand(item, ECmdPriority.Default);
+                    foreach (var item in option.ListCmd)
+                    {
+                        if (item.Type == CommandModbus_Service.CommandType.Repeat)
+                            this._totalCommandRepeat++;
+                        _commandQueue.Enqueue(item, (int)ECmdPriority.Default);
+                    }
                 }
             }
+
+            lock (_lockStop)
+            {
+                _backgroundCancelTokenSource?.Dispose();
+                _backgroundCancelTokenSource = new CancellationTokenSource();
+            }
             CancellationToken c = _backgroundCancelTokenSource.Token;
+
             _stopQueue = new KAsyncQueue<Exception>();
-            _sendCmdCancelTokenSource = new CancellationTokenSource();
-            var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
-            _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
+
+            lock (_syncAutoReconnect)
+            {
+                _linkedCmdCancelTokenSource?.Dispose();
+                _sendCmdCancelTokenSource?.Dispose();
+                _sendCmdCancelTokenSource = new CancellationTokenSource();
+                _linkedCmdCancelTokenSource = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
+            }
+
+            _taskCommand = Task.Run(() => ProcessInflightCommand(_linkedCmdCancelTokenSource.Token), _linkedCmdCancelTokenSource.Token);
             _taskEvent = Task.Run(() => ProcessInflightEvent(c), c);
             _taskStop = Task.Run(() => ProcessStopAllTask(c), c);
             _taskAutoReconnect = Task.Run(() => ProcessAutoReconnect(c), c);
-            WriteLog(EModbusLogType.Infomation, "modbus running");
+            WriteLog(EModbusLogType.Infomation, "modbus auto connect starting...");
         }
 
         private async Task ProcessAutoReconnect(CancellationToken c)
@@ -228,37 +276,55 @@ namespace KModbus.Service
                         // nếu task gửi dữ liệu chưa dừng thì dừng
                         lock (_syncAutoReconnect)
                         {
-                            if (_sendCmdCancelTokenSource.IsCancellationRequested == false)
+                            if (_sendCmdCancelTokenSource != null && !_sendCmdCancelTokenSource.IsCancellationRequested)
                             {
-                                _sendCmdCancelTokenSource?.Cancel();
+                                _sendCmdCancelTokenSource.Cancel();
                                 isCancel = true;
                             }
                         }
                         if (isCancel)
                         {
-                            // chở cho task send đóng hẳn
+                            // chờ cho task send đóng hẳn
                             await WaitForTask(_taskCommand).ConfigureAwait(false);
                         }
                         WriteLog(EModbusLogType.Infomation, "reconnect modbus ");
+                        
                         // cố gắng mở lại kết nối
-                        await Comport_InitAsync();
-                        Interlocked.Exchange(ref _isComportOpened, 1);// trạng thái báo hiệu comport đã mở
+                        await Comport_InitAsync().ConfigureAwait(false);
+                        Interlocked.Exchange(ref _isComportOpened, 1);
                         Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Opened);
-                        _sendCmdCancelTokenSource = new CancellationTokenSource();
-                        var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
-                        _taskCommand = Task.Run(() => ProcessInflightCommand(ctLink.Token), ctLink.Token);
+                        
+                        lock (_syncAutoReconnect)
+                        {
+                            _linkedCmdCancelTokenSource?.Dispose();
+                            _sendCmdCancelTokenSource?.Dispose();
+                            _sendCmdCancelTokenSource = new CancellationTokenSource();
+                            _linkedCmdCancelTokenSource = CancellationTokenSource.CreateLinkedTokenSource(c, _sendCmdCancelTokenSource.Token);
+                        }
+                        _taskCommand = Task.Run(() => ProcessInflightCommand(_linkedCmdCancelTokenSource.Token), _linkedCmdCancelTokenSource.Token);
                         WriteLog(EModbusLogType.Infomation, "reconnect success, modbus running...");
                     }
+                }
+                catch (OperationCanceledException) when (c.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
                     EventMsgHandle_ExceptionSerial msgEvent = new EventMsgHandle_ExceptionSerial(ex);
                     EnqueueEvent(msgEvent);
                 }
-                await Task.Delay(500, c).ConfigureAwait(false);
+
+                try
+                {
+                    await Task.Delay(1000, c).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
-
 
         private async Task ProcessStopAllTask(CancellationToken c)
         {
@@ -275,13 +341,15 @@ namespace KModbus.Service
             }
             catch (Exception)
             {
-                //_logger.LogError("{time} {0} cache service - fail in stop task {1}", DateTime.Now, this._name, e.Message);
             }
         }
 
         public async Task CloseCoreAsync(Exception ex)
         {
             Interlocked.Exchange(ref _connectstatus, (int)EModbusConnectStatus.Closed);
+            Interlocked.Exchange(ref _isComportOpened, 0);
+            this.IsConnected = false;
+
             lock (_lockStop)
             {
                 _backgroundCancelTokenSource?.Cancel();
@@ -289,51 +357,92 @@ namespace KModbus.Service
             lock (_syncAutoReconnect)
             {
                 _sendCmdCancelTokenSource?.Cancel();
+                _linkedCmdCancelTokenSource?.Dispose();
+                _linkedCmdCancelTokenSource = null;
             }
-            await _clientAdapter.DisconnectAsync().ConfigureAwait(false);
+
+            UnsubscribeAdapterEvents();
+
+            try
+            {
+                await _clientAdapter.DisconnectAsync().ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
+
             await WaitForTask(_taskCommand).ConfigureAwait(false);
             await WaitForTask(_taskAutoReconnect).ConfigureAwait(false);
             await WaitForTask(_taskEvent).ConfigureAwait(false);
+
             _commandQueue.Clear();
             _eventQueue.Clear();
+
             lock (_syncListTaskRpc)
             {
+                foreach (var rpc in _listTaskRpc)
+                {
+                    var noResponse = new ModbusCmdResponse_NoResponse<ModbusMessage>
+                    {
+                        Message = "Kết nối đã đóng"
+                    };
+                    rpc.TaskCompleteSource.TrySetResult(noResponse);
+                }
                 _listTaskRpc.Clear();
             }
 
-            this._waitCheckCountQueue.Release();
+            WakeUpSleepIfWaiting();
+
             if (_closedConnectionEvent.HasHandlers)
             {
                 await _closedConnectionEvent.InvokeAsync(new MsgClosedConnectionEventArgs(new EventArgs(), this)).ConfigureAwait(false);
             }
         }
 
-        private void EnqueueCommand(CommandModbus_Service cmd_data, ECmdPriority pirority)
+        private void EnqueueCommand(CommandModbus_Service cmd_data, ECmdPriority priority)
         {
-            // chỉ cho phép gửi lệnh khi cổng serial đã mở 
-            if (_isComportOpened == 1)
+            if (this.IsRunning || _isComportOpened == 1)
             {
                 lock (_commandQueue)
                 {
                     if (cmd_data.Type == CommandModbus_Service.CommandType.Repeat)
                         this._totalCommandRepeat++;
-                    _commandQueue.Enqueue(cmd_data, (int)pirority);
+                    _commandQueue.Enqueue(cmd_data, (int)priority);
                 }
-                lock (_syncWaitHandleSleep)
+
+                // Nếu là lệnh ưu tiên hoặc lệnh NoRepeat, đánh thức chu kỳ ngủ (nếu đang sleep)
+                if (priority == ECmdPriority.Priority || cmd_data.Type == CommandModbus_Service.CommandType.NoRepeat)
                 {
-                    this._waitHandleSleep.Release();
+                    WakeUpSleepIfWaiting();
                 }
             }
         }
+
+        private void WakeUpSleepIfWaiting()
+        {
+            lock (_syncWaitHandleSleep)
+            {
+                if (_wakeUpSleepSignal.CurrentCount == 0)
+                {
+                    try
+                    {
+                        _wakeUpSleepSignal.Release();
+                    }
+                    catch (SemaphoreFullException)
+                    {
+                    }
+                }
+            }
+        }
+
         private void EnqueueEvent(EventMsgHandle_Base eventData)
         {
-
             lock (_eventQueue)
             {
                 _eventQueue.Enqueue(eventData);
             }
-
         }
+
         public void SendCommand_NoRepeat(IModbusRequest requestModbus)
         {
             if (this.IsRunning)
@@ -342,6 +451,7 @@ namespace KModbus.Service
                 EnqueueCommand(cmd, ECmdPriority.Default);
             }
         }
+
         public void SendCommnad_Repeat(IModbusRequest requestModbus)
         {
             if (this.IsRunning)
@@ -349,6 +459,11 @@ namespace KModbus.Service
                 CommandModbus_Service cmd = new CommandModbus_Service(requestModbus, CommandModbus_Service.CommandType.Repeat, Guid.NewGuid());
                 EnqueueCommand(cmd, ECmdPriority.Default);
             }
+        }
+
+        public void SendCommand_Repeat(IModbusRequest requestModbus)
+        {
+            SendCommnad_Repeat(requestModbus);
         }
 
         public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request, CancellationToken c)
@@ -369,201 +484,236 @@ namespace KModbus.Service
         public async Task<ModbusCmdResponse_Base<ModbusMessage>> SendCommandNoRepeatAsync(IModbusRequest request,
                                                                     int timeOut, ECmdPriority priority, CancellationToken c)
         {
-            if (this.IsRunning)
+            if (!this.IsRunning)
             {
-                Guid id = Guid.NewGuid();
-                var _taskCompleteSouceRpc = new KAsyncTaskCompletionSource<ModbusCmdResponse_Base<ModbusMessage>>();// khởi tạo dữ liệu phản hồi
-                TaskCompleteSouceRpcModel rpc = new TaskCompleteSouceRpcModel(_taskCompleteSouceRpc, id);
-                // trước khi gửi lệnh sẽ thêm vào list task rpc
-                lock (_syncListTaskRpc)
-                {
-                    _listTaskRpc.Add(rpc);
-                }
-                ModbusCmdResponse_Base<ModbusMessage> response = null;
-                // gửi lệnh đi
+                throw new Exception("Cổng mất kết nối - không thể gửi lệnh ");
+            }
+
+            Guid id = Guid.NewGuid();
+            var taskCompleteSouceRpc = new KAsyncTaskCompletionSource<ModbusCmdResponse_Base<ModbusMessage>>();
+            TaskCompleteSouceRpcModel rpc = new TaskCompleteSouceRpcModel(taskCompleteSouceRpc, id);
+
+            lock (_syncListTaskRpc)
+            {
+                _listTaskRpc.Add(rpc);
+            }
+
+            try
+            {
                 EnqueueCommand(new CommandModbus_Service(request, CommandModbus_Service.CommandType.NoRepeat, id), priority);
+
                 using (var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, _backgroundCancelTokenSource.Token))
                 using (var ctTimeOut = new CancellationTokenSource(timeOut))
+                using (var ct = CancellationTokenSource.CreateLinkedTokenSource(ctLink.Token, ctTimeOut.Token))
+                using (ct.Token.Register(() =>
                 {
-                    var ct = CancellationTokenSource.CreateLinkedTokenSource(ctLink.Token, ctTimeOut.Token);
-                    var register = ct.Token.Register(() =>
-                    {
-                        lock (_syncListTaskRpc)
-                        {
-                            _taskCompleteSouceRpc.TrySetCanceled();
-                        }
-                    }, useSynchronizationContext: true);
-                    Task task;
-                    lock (_syncListTaskRpc)
-                    {
-                        task = _taskCompleteSouceRpc.Task;
-                    }
-                    bool isCancellation = true;
+                    taskCompleteSouceRpc.TrySetCanceled();
+                }, useSynchronizationContext: false))
+                {
                     try
                     {
-                        await task.ConfigureAwait(false);
-                        isCancellation = false;
+                        return await taskCompleteSouceRpc.Task.ConfigureAwait(false);
                     }
                     catch (Exception)
                     {
-                        isCancellation = true;
-                    }
-                    if (isCancellation == false)
-                    {
-                        register.Dispose();
-                        ct.Dispose();
-                        response = _taskCompleteSouceRpc.Task.Result;
-                    }
-                    else
-                    {
-                        register.Dispose();
-                        ct.Dispose();
-                        ModbusCmdResponse_NoResponse<ModbusMessage> noResponse = new ModbusCmdResponse_NoResponse<ModbusMessage>();
-                        noResponse.ResultObj = new ModbusMessage(request, null);
-                        response = noResponse;
+                        ModbusCmdResponse_NoResponse<ModbusMessage> noResponse = new ModbusCmdResponse_NoResponse<ModbusMessage>
+                        {
+                            ResultObj = new ModbusMessage(request, null)
+                        };
                         return noResponse;
                     }
                 }
-                // xóa bỏ task rpc khỏi 
+            }
+            finally
+            {
                 lock (_syncListTaskRpc)
                 {
                     _listTaskRpc.Remove(rpc);
                 }
-                return response;
-            }
-            else
-            {
-                throw new Exception("Cổng mất kết nối - không thể gửi lệnh ");
             }
         }
 
         private async Task ProcessInflightCommand(CancellationToken c)
         {
-            try
+            int totalCommandExcute = 0;
+            while (!c.IsCancellationRequested)
             {
-                int totalCommandExcute = 0;
-                while (!c.IsCancellationRequested)
+                try
                 {
                     var queueItem = await _commandQueue.TryDequeueAsync(c).ConfigureAwait(false);
-                    if (queueItem.IsSuccess && !c.IsCancellationRequested)
+                    if (!queueItem.IsSuccess || c.IsCancellationRequested)
                     {
-                        CommandModbus_Service cmd_data = queueItem.Item;
-                        if (cmd_data != null)
-                        {
-                            Guid commandId = cmd_data.Id;
-                            bool loop = true;
-                            int step = 0;
-                            int retry = 0;
-                            if (cmd_data.Type == CommandModbus_Service.CommandType.Repeat)
-                                totalCommandExcute++;
-                            while (loop && !c.IsCancellationRequested)
-                            {
-                                switch (step)
-                                {
-                                    case 0:// gửi lệnh
-                                        {
-                                            _taskCompleteSouceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
-                                            await _clientAdapter.SendDataAsync(cmd_data.ModbusRequest);
-                                            using (var ctTimeOut = new CancellationTokenSource(_option.WaitResponse))
-                                            using (var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, ctTimeOut.Token))
-                                            {
-                                                var register = ctLink.Token.Register(() =>
-                                                {
-                                                    lock (_syncCommand)
-                                                    {
-                                                        _taskCompleteSouceMessage.TrySetCanceled();
-                                                    }
-                                                }, useSynchronizationContext: false);
-                                                Task task;
-                                                lock (_syncMessage)
-                                                {
-                                                    task = _taskCompleteSouceMessage.Task;
-                                                }
-                                                bool isCancellation = true;
-                                                try
-                                                {
-                                                    await task.ConfigureAwait(false);
-                                                    isCancellation = false;
-                                                }
-                                                catch (Exception)
-                                                {
-                                                    isCancellation = true;
-                                                }
-                                                if (!isCancellation)// có phản hồi 
-                                                {
-                                                    register.Dispose();// 
-                                                    retry = 0;
-                                                    this.IsConnected = true;
-                                                    ModbusMessage msgModbus = new ModbusMessage(cmd_data.ModbusRequest, _taskCompleteSouceMessage.Task.Result);
-                                                    EnqueueEvent(new EventMsgHandle_Response(msgModbus));
-                                                    loop = false;
+                        continue;
+                    }
 
-                                                    // xử lí rpc
-                                                    lock (_syncListTaskRpc)
-                                                    {
-                                                        var find = _listTaskRpc.Find(x => x.Id == commandId);
-                                                        if (find != null)
-                                                        {
-                                                            var modbusMessage = new ModbusMessage(cmd_data.ModbusRequest, msgModbus.Response);
-                                                            ModbusCmdResponse_Success<ModbusMessage> success = new ModbusCmdResponse_Success<ModbusMessage>(modbusMessage);
-                                                            find.TaskCompleteSource.TrySetResult(success);
-                                                        }
-                                                    }
-                                                    // trễ 1 khoảng thời gian sau khi nhận được phản hổi từ modbus slaver
-                                                    await Task.Delay(this._delayResponse, c).ConfigureAwait(false);
-                                                }
-                                                else
+                    CommandModbus_Service cmd_data = queueItem.Item;
+                    if (cmd_data == null)
+                    {
+                        continue;
+                    }
+
+                    Guid commandId = cmd_data.Id;
+                    bool loop = true;
+                    int step = 0;
+                    int retry = 0;
+
+                    if (cmd_data.Type == CommandModbus_Service.CommandType.Repeat)
+                        totalCommandExcute++;
+
+                    while (loop && !c.IsCancellationRequested)
+                    {
+                        switch (step)
+                        {
+                            case 0: // gửi lệnh
+                                {
+                                    lock (_syncMessage)
+                                    {
+                                        _currentInflightRequest = cmd_data.ModbusRequest;
+                                        _taskCompleteSourceMessage = new KAsyncTaskCompletionSource<IModbusResponse>();
+                                    }
+
+                                    await _clientAdapter.SendDataAsync(cmd_data.ModbusRequest).ConfigureAwait(false);
+
+                                    int waitTimeout = _option?.WaitResponse ?? 1000;
+                                    using (var ctTimeOut = new CancellationTokenSource(waitTimeout))
+                                    using (var ctLink = CancellationTokenSource.CreateLinkedTokenSource(c, ctTimeOut.Token))
+                                    using (ctLink.Token.Register(() =>
+                                    {
+                                        lock (_syncMessage)
+                                        {
+                                            _taskCompleteSourceMessage?.TrySetCanceled();
+                                        }
+                                    }, useSynchronizationContext: false))
+                                    {
+                                        Task<IModbusResponse> task;
+                                        lock (_syncMessage)
+                                        {
+                                            task = _taskCompleteSourceMessage.Task;
+                                        }
+
+                                        bool isCancellation = true;
+                                        try
+                                        {
+                                            await task.ConfigureAwait(false);
+                                            isCancellation = false;
+                                        }
+                                        catch (Exception)
+                                        {
+                                            isCancellation = true;
+                                        }
+
+                                        if (!isCancellation) // có phản hồi
+                                        {
+                                            retry = 0;
+                                            this.IsConnected = true;
+                                            ModbusMessage msgModbus = new ModbusMessage(cmd_data.ModbusRequest, task.Result);
+                                            EnqueueEvent(new EventMsgHandle_Response(msgModbus));
+                                            loop = false;
+
+                                            // xử lí rpc
+                                            lock (_syncListTaskRpc)
+                                            {
+                                                var find = _listTaskRpc.Find(x => x.Id == commandId);
+                                                if (find != null)
                                                 {
-                                                    register.Dispose();// 
-                                                    if (++retry >= _option.Retry)
+                                                    var modbusMessage = new ModbusMessage(cmd_data.ModbusRequest, msgModbus.Response);
+                                                    ModbusCmdResponse_Success<ModbusMessage> success = new ModbusCmdResponse_Success<ModbusMessage>(modbusMessage);
+                                                    find.TaskCompleteSource.TrySetResult(success);
+                                                }
+                                            }
+
+                                            // trễ 1 khoảng thời gian sau khi nhận được phản hồi từ modbus slave
+                                            if (this._delayResponse > 0)
+                                            {
+                                                await Task.Delay(this._delayResponse, c).ConfigureAwait(false);
+                                            }
+                                        }
+                                        else // không có phản hồi cho lượt gửi này
+                                        {
+                                            int maxRetry = _option?.Retry ?? 1;
+                                            if (++retry >= maxRetry)
+                                            {
+                                                step = 2; // hết số lần retry
+                                                this.IsConnected = false;
+                                                EnqueueEvent(new EventMsgHandle_NoResponse(cmd_data.ModbusRequest));
+
+                                                // Báo ngay lập tức cho RPC caller biết là NoResponse
+                                                lock (_syncListTaskRpc)
+                                                {
+                                                    var find = _listTaskRpc.Find(x => x.Id == commandId);
+                                                    if (find != null)
                                                     {
-                                                        step = 2;// không có phản hồi từ dưới thiết bị gửi lên
-                                                        this.IsConnected = false;
-                                                        EnqueueEvent(new EventMsgHandle_NoResponse(cmd_data.ModbusRequest));
+                                                        var noResponse = new ModbusCmdResponse_NoResponse<ModbusMessage>
+                                                        {
+                                                            ResultObj = new ModbusMessage(cmd_data.ModbusRequest, null)
+                                                        };
+                                                        find.TaskCompleteSource.TrySetResult(noResponse);
                                                     }
                                                 }
                                             }
                                         }
-                                        break;
-                                    case 2:
-                                        {
-                                            loop = false;
-                                        }
-                                        break;
-                                }
-                            }
-
-                            // đẩy xuống đáy bộ nhớ để thực hiện lệnh tiếp theo
-                            if (cmd_data.Type == CommandModbus_Service.CommandType.Repeat)// nếu là lệnh yêu cầu lặp lại
-                            {
-                                _commandQueue.Enqueue(cmd_data, (int)ECmdPriority.Default);
-                            }
-
-                            // nếu thực hiện hết 1 chu trình lệnh -> ngủ 1 khoảng thời gian
-                            if (totalCommandExcute >= this._totalCommandRepeat)
-                            {
-                                totalCommandExcute = 0;
-
-                                if (this._msSleep > 0)
-                                {
-                                    Task task;
-                                    lock (_syncWaitHandleSleep)
-                                    {
-                                        task = this._waitHandleSleep.WaitAsync(this._msSleep, c);
                                     }
-                                    await task.ConfigureAwait(false);
                                 }
-                            }
+                                break;
+                            case 2:
+                                {
+                                    loop = false;
+                                }
+                                break;
                         }
                     }
 
+                    lock (_syncMessage)
+                    {
+                        _currentInflightRequest = null;
+                    }
+
+                    // đẩy xuống đáy bộ nhớ để thực hiện lệnh tiếp theo (nếu là lệnh lặp)
+                    if (cmd_data.Type == CommandModbus_Service.CommandType.Repeat)
+                    {
+                        _commandQueue.Enqueue(cmd_data, (int)ECmdPriority.Default);
+                    }
+
+                    // nếu thực hiện hết 1 chu trình lệnh lặp -> ngủ 1 khoảng thời gian
+                    if (this._totalCommandRepeat > 0 && totalCommandExcute >= this._totalCommandRepeat)
+                    {
+                        totalCommandExcute = 0;
+
+                        if (this._msSleep > 0)
+                        {
+                            // Drain các tín hiệu đánh thức còn sót lại trước khi vào chu kỳ ngủ mới
+                            while (_wakeUpSleepSignal.Wait(0)) { }
+                            await _wakeUpSleepSignal.WaitAsync(this._msSleep, c).ConfigureAwait(false);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (c.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    lock (_syncMessage)
+                    {
+                        _currentInflightRequest = null;
+                    }
+                    WriteLog(EModbusLogType.Error, "Lỗi trong tiến trình gửi lệnh: " + ex.Message, ex);
+                    EventMsgHandle_ExceptionSerial msgEvent = new EventMsgHandle_ExceptionSerial(ex);
+                    EnqueueEvent(msgEvent);
+                    Interlocked.Exchange(ref _isComportOpened, 0);
+                    this.IsConnected = false;
+                    try
+                    {
+                        await Task.Delay(500, c).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
-            catch (Exception)
-            {
-
-            }
         }
+
         private async Task ProcessInflightEvent(CancellationToken c)
         {
             while (!c.IsCancellationRequested)
@@ -604,7 +754,6 @@ namespace KModbus.Service
                                     }
                                     WriteLog(EModbusLogType.Warning, "device no response");
                                 }
-
                                 break;
                             case EventMsgHandle_Base.TYPE_EXCEPTION_COMPORT:
                                 {
@@ -613,15 +762,17 @@ namespace KModbus.Service
                                     {
                                         await _exceptionEvent.InvokeAsync(new MsgExceptionEventArgs(msg.Ex, this)).ConfigureAwait(false);
                                     }
-                                    WriteLog(EModbusLogType.Error, "serial port closed", msg.Ex);
                                 }
                                 break;
                         }
                     }
                 }
+                catch (OperationCanceledException) when (c.IsCancellationRequested)
+                {
+                    break;
+                }
                 catch (Exception)
                 {
-
                 }
             }
         }
@@ -636,17 +787,37 @@ namespace KModbus.Service
             EnqueueEvent(new EventMsgHandle_Log(type, message));
         }
 
+        private void SubscribeAdapterEvents()
+        {
+            UnsubscribeAdapterEvents();
+            if (_clientAdapter != null)
+            {
+                _clientAdapter.MessageRecieved += ClientComport_MessageRecieved1;
+                _clientAdapter.OnExceptionOccur += ClientComport_OnExceptionOccur;
+                _clientAdapter.Closed += ClientComport_Closed;
+            }
+        }
+
+        private void UnsubscribeAdapterEvents()
+        {
+            if (_clientAdapter != null)
+            {
+                _clientAdapter.MessageRecieved -= ClientComport_MessageRecieved1;
+                _clientAdapter.OnExceptionOccur -= ClientComport_OnExceptionOccur;
+                _clientAdapter.Closed -= ClientComport_Closed;
+            }
+        }
+
         private async Task Comport_InitAsync()
         {
-            await _clientAdapter.ConnectAsync();
-            _clientAdapter.MessageRecieved += ClientComport_MessageRecieved1;
-            _clientAdapter.OnExceptionOccur += ClientComport_OnExceptionOccur;
-            _clientAdapter.Closed += ClientComport_Closed; ;
+            SubscribeAdapterEvents();
+            await _clientAdapter.ConnectAsync().ConfigureAwait(false);
         }
 
         private void ClientComport_Closed(object sender, EventArgs e)
         {
             Interlocked.Exchange(ref _isComportOpened, 0);
+            this.IsConnected = false;
         }
 
         private void ClientComport_OnExceptionOccur(object sender, Exception ex)
@@ -659,9 +830,21 @@ namespace KModbus.Service
         {
             lock (_syncMessage)
             {
-                _taskCompleteSouceMessage.TrySetResult(e);
+                if (_currentInflightRequest != null && e != null)
+                {
+                    bool isAddressMatch = (e.SlaverAddress == _currentInflightRequest.SlaverAddress);
+                    bool isFunctionMatch = (e.FuntionCode == _currentInflightRequest.FuntionCode ||
+                                            e.FuntionCode == (_currentInflightRequest.FuntionCode | 0x80));
+                    if (!isAddressMatch || !isFunctionMatch)
+                    {
+                        // Bỏ qua gói tin không khớp với request hiện tại
+                        return;
+                    }
+                }
+                _taskCompleteSourceMessage?.TrySetResult(e);
             }
         }
+
         private async Task WaitForTask(Task task)
         {
             try
@@ -671,8 +854,36 @@ namespace KModbus.Service
             }
             catch (Exception)
             {
-
             }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                Disconnect();
+            }
+            catch
+            {
+            }
+
+            UnsubscribeAdapterEvents();
+
+            lock (_syncAutoReconnect)
+            {
+                _linkedCmdCancelTokenSource?.Dispose();
+                _linkedCmdCancelTokenSource = null;
+                _sendCmdCancelTokenSource?.Dispose();
+                _sendCmdCancelTokenSource = null;
+            }
+
+            lock (_lockStop)
+            {
+                _backgroundCancelTokenSource?.Dispose();
+                _backgroundCancelTokenSource = null;
+            }
+
+            _wakeUpSleepSignal?.Dispose();
         }
     }
 }

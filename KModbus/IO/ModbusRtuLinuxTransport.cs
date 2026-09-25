@@ -110,6 +110,8 @@ namespace KModbus.IO
 #else
                     comport.StopBits = _config.StopBit;
 #endif
+                    comport.DtrEnable = _config.DtrEnable;
+                    comport.RtsEnable = _config.RtsEnable;
                     comport.Open();
                     comport.DiscardOutBuffer();
                     comport.DiscardInBuffer();

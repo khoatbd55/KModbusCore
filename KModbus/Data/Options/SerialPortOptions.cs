@@ -14,5 +14,7 @@ namespace KModbus.Data.Options
         public Parity Parity { get; set; } = Parity.None;
         public int DataBit { get; set; } = 8;
         public StopBits StopBit { get; set; } = StopBits.One;
+        public bool DtrEnable { get; set; } = false;
+        public bool RtsEnable { get; set; } = false;
     }
 }
